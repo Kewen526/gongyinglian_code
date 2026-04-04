@@ -20,8 +20,12 @@ import (
 )
 
 func main() {
-	// Load config
-	cfg := config.DefaultConfig()
+	// Load config: try config.json first, fallback to defaults
+	cfg, err := config.LoadConfig("configs/config.json")
+	if err != nil {
+		log.Printf("[Config] config.json not found, using defaults: %v\n", err)
+		cfg = config.DefaultConfig()
+	}
 	log.Println("[Config] Loaded configuration")
 
 	// ---------- MySQL ----------
