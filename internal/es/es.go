@@ -21,6 +21,8 @@ var Client *elasticsearch.Client
 func InitES(cfg *config.ElasticsearchConfig) error {
 	esCfg := elasticsearch.Config{
 		Addresses: cfg.Addresses,
+		Username:  cfg.Username,
+		Password:  cfg.Password,
 	}
 	client, err := elasticsearch.NewClient(esCfg)
 	if err != nil {

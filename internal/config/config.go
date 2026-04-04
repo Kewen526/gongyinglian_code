@@ -31,6 +31,8 @@ type MySQLConfig struct {
 
 type ElasticsearchConfig struct {
 	Addresses    []string `json:"addresses"`
+	Username     string   `json:"username"`
+	Password     string   `json:"password"`
 	ProductIndex string   `json:"product_index"`
 }
 
