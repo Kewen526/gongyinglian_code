@@ -1,0 +1,19 @@
+server:
+  port: 8080
+
+mysql:
+  dsn: "root:password@tcp(127.0.0.1:3306)/supply_chain?charset=utf8mb4&parseTime=True&loc=Local"
+  max_open_conns: 100
+  max_idle_conns: 20
+  conn_max_lifetime_minutes: 30
+
+elasticsearch:
+  addresses:
+    - "http://127.0.0.1:9200"
+  product_index: "products"
+
+oss:
+  endpoint: "oss-cn-hangzhou.aliyuncs.com"
+  access_key_id: "your-access-key-id"
+  access_key_secret: "your-access-key-secret"
+  bucket_name: "your-bucket-name"
