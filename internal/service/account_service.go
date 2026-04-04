@@ -17,6 +17,22 @@ func NewAccountService(repo *repository.AccountRepo) *AccountService {
 	return &AccountService{repo: repo}
 }
 
+func (s *AccountService) Login(req *model.LoginReq) (*model.Account, error) {
+	account, err := s.repo.GetByUsername(req.Username)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("用户名或密码错误")
+		}
+		return nil, err
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(account.Password), []byte(req.Password)); err != nil {
+		return nil, errors.New("用户名或密码错误")
+	}
+
+	return account, nil
+}
+
 func (s *AccountService) CreateAccount(req *model.CreateAccountReq) (*model.Account, error) {
 	// Check if username already exists
 	_, err := s.repo.GetByUsername(req.Username)

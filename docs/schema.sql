@@ -20,7 +20,7 @@ CREATE TABLE `account` (
   `username`   VARCHAR(64)     NOT NULL COMMENT '用户名/登录名',
   `password`   VARCHAR(255)    NOT NULL COMMENT '密码(bcrypt)',
   `real_name`  VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '真实姓名',
-  `role`       TINYINT UNSIGNED NOT NULL COMMENT '角色: 1=团队负责人, 2=主管, 3=员工',
+  `role`       TINYINT UNSIGNED NOT NULL COMMENT '角色: 0=超级管理员, 1=团队负责人, 2=主管, 3=员工',
   `created_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `updated_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),

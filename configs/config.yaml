@@ -12,6 +12,10 @@ elasticsearch:
     - "http://127.0.0.1:9200"
   product_index: "products"
 
+jwt:
+  secret: "supply-chain-jwt-secret-key-change-in-production"
+  expire_hour: 24
+
 oss:
   endpoint: "oss-cn-hangzhou.aliyuncs.com"
   access_key_id: "your-access-key-id"

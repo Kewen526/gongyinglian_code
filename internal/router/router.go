@@ -3,54 +3,81 @@ package router
 import (
 	"supply-chain/internal/handler"
 	"supply-chain/internal/middleware"
+	"supply-chain/internal/repository"
 
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRouter(accountHandler *handler.AccountHandler, productHandler *handler.ProductHandler) *gin.Engine {
+func SetupRouter(
+	accountHandler *handler.AccountHandler,
+	productHandler *handler.ProductHandler,
+	accountRepo *repository.AccountRepo,
+) *gin.Engine {
 	r := gin.Default()
-	r.Use(middleware.Recovery())
 
 	api := r.Group("/api/v1")
 
-	// ---------- Account / Permission ----------
-	api.POST("/accounts", accountHandler.CreateAccount)
-	api.GET("/modules", accountHandler.GetAllModules)
-	api.GET("/accounts/:id", accountHandler.GetAccountDetail)
-	api.PUT("/accounts/:id/permissions", accountHandler.UpdatePermissions)
+	// ========== Public (no auth) ==========
+	api.POST("/login", accountHandler.Login)
 
-	// ---------- Product ----------
-	api.GET("/products", productHandler.ListProducts)
-	api.POST("/products", productHandler.CreateProduct)
-	api.GET("/products/:id", productHandler.GetProductDetail)
-	api.PUT("/products/:id", productHandler.UpdateProduct)
-	api.DELETE("/products/:id", productHandler.DeleteProduct)
+	// ========== Authenticated routes ==========
+	auth := api.Group("")
+	auth.Use(middleware.JWTAuth())
 
-	// Spec
-	api.POST("/products/:id/specs", productHandler.CreateSpec)
-	api.PUT("/products/:id/specs/:specId", productHandler.UpdateSpec)
-	api.DELETE("/products/:id/specs/:specId", productHandler.DeleteSpec)
+	// --- Account management (super admin only) ---
+	adminOnly := auth.Group("")
+	adminOnly.Use(middleware.RequireSuperAdmin())
+	{
+		adminOnly.POST("/accounts", accountHandler.CreateAccount)
+		adminOnly.GET("/accounts/:id", accountHandler.GetAccountDetail)
+		adminOnly.PUT("/accounts/:id/permissions", accountHandler.UpdatePermissions)
+	}
 
-	// Platform Price
-	api.POST("/products/:id/platform-prices", productHandler.CreatePlatformPrice)
-	api.PUT("/products/:id/platform-prices/:priceId", productHandler.UpdatePlatformPrice)
-	api.DELETE("/products/:id/platform-prices/:priceId", productHandler.DeletePlatformPrice)
+	// --- Modules (any logged-in user) ---
+	auth.GET("/modules", accountHandler.GetAllModules)
 
-	// SKU
-	api.POST("/products/:id/skus", productHandler.CreateSKU)
-	api.PUT("/products/:id/skus/:skuId", productHandler.UpdateSKU)
-	api.DELETE("/products/:id/skus/:skuId", productHandler.DeleteSKU)
+	// --- Product: view permission ---
+	productView := auth.Group("")
+	productView.Use(middleware.RequireModulePermission(accountRepo, "product", false))
+	{
+		productView.GET("/products", productHandler.ListProducts)
+		productView.GET("/products/:id", productHandler.GetProductDetail)
+	}
 
-	// Detail Images
-	api.POST("/products/:id/detail-images", productHandler.BatchCreateDetailImages)
-	api.DELETE("/products/:id/detail-images/:imageId", productHandler.DeleteDetailImage)
+	// --- Product: edit permission ---
+	productEdit := auth.Group("")
+	productEdit.Use(middleware.RequireModulePermission(accountRepo, "product", true))
+	{
+		productEdit.POST("/products", productHandler.CreateProduct)
+		productEdit.PUT("/products/:id", productHandler.UpdateProduct)
+		productEdit.DELETE("/products/:id", productHandler.DeleteProduct)
 
-	// Videos
-	api.POST("/products/:id/videos", productHandler.BatchCreateVideos)
-	api.DELETE("/products/:id/videos/:videoId", productHandler.DeleteVideo)
+		// Spec
+		productEdit.POST("/products/:id/specs", productHandler.CreateSpec)
+		productEdit.PUT("/products/:id/specs/:specId", productHandler.UpdateSpec)
+		productEdit.DELETE("/products/:id/specs/:specId", productHandler.DeleteSpec)
 
-	// ES Full Reindex
-	api.POST("/products/reindex", productHandler.FullReindex)
+		// Platform Price
+		productEdit.POST("/products/:id/platform-prices", productHandler.CreatePlatformPrice)
+		productEdit.PUT("/products/:id/platform-prices/:priceId", productHandler.UpdatePlatformPrice)
+		productEdit.DELETE("/products/:id/platform-prices/:priceId", productHandler.DeletePlatformPrice)
+
+		// SKU
+		productEdit.POST("/products/:id/skus", productHandler.CreateSKU)
+		productEdit.PUT("/products/:id/skus/:skuId", productHandler.UpdateSKU)
+		productEdit.DELETE("/products/:id/skus/:skuId", productHandler.DeleteSKU)
+
+		// Detail Images
+		productEdit.POST("/products/:id/detail-images", productHandler.BatchCreateDetailImages)
+		productEdit.DELETE("/products/:id/detail-images/:imageId", productHandler.DeleteDetailImage)
+
+		// Videos
+		productEdit.POST("/products/:id/videos", productHandler.BatchCreateVideos)
+		productEdit.DELETE("/products/:id/videos/:videoId", productHandler.DeleteVideo)
+
+		// ES Full Reindex (edit permission required)
+		productEdit.POST("/products/reindex", productHandler.FullReindex)
+	}
 
 	return r
 }

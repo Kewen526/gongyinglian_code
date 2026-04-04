@@ -4,9 +4,10 @@ import "time"
 
 // Role constants
 const (
-	RoleTeamLead  = 1 // 团队负责人
+	RoleSuperAdmin = 0 // 超级管理员（拥有所有权限+开账号权限）
+	RoleTeamLead   = 1 // 团队负责人
 	RoleSupervisor = 2 // 主管
-	RoleEmployee  = 3 // 员工
+	RoleEmployee   = 3 // 员工
 )
 
 type Account struct {
@@ -49,7 +50,7 @@ type CreateAccountReq struct {
 	Username    string             `json:"username" binding:"required"`
 	Password    string             `json:"password" binding:"required,min=6"`
 	RealName    string             `json:"real_name"`
-	Role        uint8              `json:"role" binding:"required,oneof=1 2 3"`
+	Role        uint8              `json:"role" binding:"oneof=0 1 2 3"`
 	Permissions []PermissionItem   `json:"permissions"`
 }
 
@@ -78,4 +79,16 @@ type PermissionDetail struct {
 	ModuleCode string `json:"module_code"`
 	CanView    uint8  `json:"can_view"`
 	CanEdit    uint8  `json:"can_edit"`
+}
+
+// ---------- Login DTOs ----------
+
+type LoginReq struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+type LoginResp struct {
+	Token     string            `json:"token"`
+	Account   AccountDetailResp `json:"account"`
 }

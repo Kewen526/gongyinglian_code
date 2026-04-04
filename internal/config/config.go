@@ -10,6 +10,12 @@ type Config struct {
 	MySQL         MySQLConfig         `json:"mysql"`
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
 	OSS           OSSConfig           `json:"oss"`
+	JWT           JWTConfig           `json:"jwt"`
+}
+
+type JWTConfig struct {
+	Secret     string `json:"secret"`
+	ExpireHour int    `json:"expire_hour"`
 }
 
 type ServerConfig struct {
@@ -69,6 +75,10 @@ func DefaultConfig() *Config {
 			AccessKeyID:     "",
 			AccessKeySecret: "",
 			BucketName:      "",
+		},
+		JWT: JWTConfig{
+			Secret:     "supply-chain-jwt-secret-key-change-in-production",
+			ExpireHour: 24,
 		},
 	}
 	GlobalConfig = cfg
