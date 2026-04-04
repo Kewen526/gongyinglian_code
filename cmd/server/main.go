@@ -8,17 +8,19 @@ import (
 	"supply-chain/internal/config"
 	"supply-chain/internal/es"
 	"supply-chain/internal/handler"
+	"supply-chain/internal/model"
 	"supply-chain/internal/repository"
 	"supply-chain/internal/router"
 	"supply-chain/internal/service"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
 func main() {
-	// Load config (use default if config file not found)
+	// Load config
 	cfg := config.DefaultConfig()
 	log.Println("[Config] Loaded configuration")
 
@@ -35,7 +37,6 @@ func main() {
 		log.Fatalf("Failed to get underlying sql.DB: %v", err)
 	}
 
-	// Connection pool settings
 	sqlDB.SetMaxOpenConns(cfg.MySQL.MaxOpenConns)
 	sqlDB.SetMaxIdleConns(cfg.MySQL.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(time.Duration(cfg.MySQL.ConnMaxLifetimeMinutes) * time.Minute)
@@ -44,6 +45,9 @@ func main() {
 		"MaxOpen=", cfg.MySQL.MaxOpenConns,
 		"MaxIdle=", cfg.MySQL.MaxIdleConns,
 		"MaxLifetime=", cfg.MySQL.ConnMaxLifetimeMinutes, "min")
+
+	// ---------- Auto-create super admin ----------
+	initSuperAdmin(db)
 
 	// ---------- Elasticsearch ----------
 	if err := es.InitES(&cfg.Elasticsearch); err != nil {
@@ -63,7 +67,7 @@ func main() {
 	productHandler := handler.NewProductHandler(productService)
 
 	// ---------- Router ----------
-	r := router.SetupRouter(accountHandler, productHandler)
+	r := router.SetupRouter(accountHandler, productHandler, accountRepo)
 
 	// ---------- Start Server ----------
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
@@ -71,4 +75,32 @@ func main() {
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+// initSuperAdmin creates the default super admin account if it doesn't exist.
+// Default credentials: admin / admin123
+func initSuperAdmin(db *gorm.DB) {
+	var count int64
+	db.Model(&model.Account{}).Where("role = ?", model.RoleSuperAdmin).Count(&count)
+	if count > 0 {
+		log.Println("[Init] Super admin already exists, skipping")
+		return
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatalf("Failed to hash super admin password: %v", err)
+	}
+
+	admin := model.Account{
+		Username: "admin",
+		Password: string(hashed),
+		RealName: "超级管理员",
+		Role:     model.RoleSuperAdmin,
+	}
+
+	if err := db.Create(&admin).Error; err != nil {
+		log.Fatalf("Failed to create super admin: %v", err)
+	}
+	log.Println("[Init] Super admin created: username=admin, password=admin123")
 }
