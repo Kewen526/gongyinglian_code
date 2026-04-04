@@ -30,6 +30,8 @@ MYSQL_DB="supply_chain"
 
 # Elasticsearch 配置
 ES_HOST="http://127.0.0.1:9200"
+ES_USER="elastic"
+ES_PASS="prU_ai0Bfl95K-J5Zq*-"
 
 # JWT 配置
 JWT_SECRET="supply-chain-jwt-$(openssl rand -hex 16)"
@@ -93,6 +95,8 @@ cat > "${DEPLOY_DIR}/configs/config.json" <<CFGEOF
   },
   "elasticsearch": {
     "addresses": ["${ES_HOST}"],
+    "username": "${ES_USER}",
+    "password": "${ES_PASS}",
     "product_index": "products"
   },
   "jwt": {
