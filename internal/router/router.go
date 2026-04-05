@@ -12,6 +12,7 @@ func SetupRouter(
 	accountHandler *handler.AccountHandler,
 	productHandler *handler.ProductHandler,
 	uploadHandler *handler.UploadHandler,
+	orderHandler *handler.OrderHandler,
 	accountRepo *repository.AccountRepo,
 ) *gin.Engine {
 	r := gin.Default()
@@ -87,6 +88,28 @@ func SetupRouter(
 		// ES Full Reindex (edit permission required)
 		productEdit.POST("/products/reindex", productHandler.FullReindex)
 	}
+
+	// --- Order: view permission ---
+	orderView := auth.Group("")
+	orderView.Use(middleware.RequireModulePermission(accountRepo, "order", false))
+	{
+		orderView.GET("/orders", orderHandler.ListOrders)
+		orderView.GET("/orders/:id", orderHandler.GetOrderDetail)
+		orderView.GET("/shops", orderHandler.GetAllShops)
+		orderView.GET("/shops/grouped", orderHandler.GetShopsGrouped)
+		orderView.GET("/platforms", orderHandler.GetPlatforms)
+	}
+
+	// --- Order: edit permission (manual sync) ---
+	orderEdit := auth.Group("")
+	orderEdit.Use(middleware.RequireModulePermission(accountRepo, "order", true))
+	{
+		orderEdit.POST("/orders/sync", orderHandler.ManualSync)
+	}
+
+	// --- Account shop permissions (super admin only) ---
+	adminOnly.GET("/accounts/:id/shops", orderHandler.GetAccountShops)
+	adminOnly.PUT("/accounts/:id/shops", orderHandler.UpdateAccountShops)
 
 	return r
 }

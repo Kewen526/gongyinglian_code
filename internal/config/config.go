@@ -11,6 +11,12 @@ type Config struct {
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
 	COS           COSConfig           `json:"cos"`
 	JWT           JWTConfig           `json:"jwt"`
+	WanLiNiu      WanLiNiuConfig      `json:"wanliniu"`
+}
+
+type WanLiNiuConfig struct {
+	AppKey    string `json:"app_key"`
+	AppSecret string `json:"app_secret"`
 }
 
 type JWTConfig struct {

@@ -58,6 +58,101 @@ INSERT INTO `module` (`name`, `code`) VALUES
   ('订单管理', 'order');
 
 -- ------------------------------------------------------------
+-- 3. 订单管理模块
+-- ------------------------------------------------------------
+
+-- 订单主表（从万里牛ERP同步）
+CREATE TABLE `order_trade` (
+  `id`                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `uid`               VARCHAR(64)     NOT NULL COMMENT '万里牛订单唯一ID',
+  `order_id`          VARCHAR(64)     NOT NULL COMMENT '平台订单号',
+  `platform`          VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '平台(如: 淘宝, 京东, 拼多多)',
+  `shop_name`         VARCHAR(128)    NOT NULL DEFAULT '' COMMENT '店铺名称',
+  `status`            VARCHAR(32)     NOT NULL DEFAULT '' COMMENT '订单状态',
+  `trade_status`      VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '交易状态',
+  `buyer_nick`        VARCHAR(128)    NOT NULL DEFAULT '' COMMENT '买家昵称',
+  `receiver_name`     VARCHAR(128)    NOT NULL DEFAULT '' COMMENT '收货人姓名',
+  `receiver_phone`    VARCHAR(32)     NOT NULL DEFAULT '' COMMENT '收货人手机',
+  `receiver_province` VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '收货省份',
+  `receiver_city`     VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '收货城市',
+  `receiver_district` VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '收货区县',
+  `receiver_address`  VARCHAR(512)    NOT NULL DEFAULT '' COMMENT '收货详细地址',
+  `total_amount`      DECIMAL(12,2)   NOT NULL DEFAULT 0.00 COMMENT '订单总金额',
+  `pay_amount`        DECIMAL(12,2)   NOT NULL DEFAULT 0.00 COMMENT '实付金额',
+  `post_fee`          DECIMAL(12,2)   NOT NULL DEFAULT 0.00 COMMENT '邮费',
+  `discount_fee`      DECIMAL(12,2)   NOT NULL DEFAULT 0.00 COMMENT '优惠金额',
+  `logistics_name`    VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '物流公司',
+  `logistics_no`      VARCHAR(128)    NOT NULL DEFAULT '' COMMENT '物流单号',
+  `buyer_message`     TEXT                                 COMMENT '买家留言',
+  `seller_remark`     TEXT                                 COMMENT '卖家备注',
+  `pay_time`          DATETIME                             COMMENT '付款时间',
+  `send_time`         DATETIME                             COMMENT '发货时间',
+  `trade_time`        DATETIME                             COMMENT '交易时间',
+  `modify_time`       DATETIME                             COMMENT '最后修改时间(万里牛)',
+  `created_at`        DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at`        DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_uid` (`uid`),
+  KEY `idx_order_id` (`order_id`),
+  KEY `idx_shop_name` (`shop_name`),
+  KEY `idx_status` (`status`),
+  KEY `idx_trade_time` (`trade_time`),
+  KEY `idx_modify_time` (`modify_time`),
+  KEY `idx_logistics_no` (`logistics_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单主表(万里牛同步)';
+
+-- 订单明细表
+CREATE TABLE `order_item` (
+  `id`            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `trade_uid`     VARCHAR(64)     NOT NULL COMMENT '订单UID(关联order_trade.uid)',
+  `item_id`       VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '商品ID',
+  `sku_id`        VARCHAR(64)     NOT NULL DEFAULT '' COMMENT 'SKU ID',
+  `product_name`  VARCHAR(255)    NOT NULL DEFAULT '' COMMENT '商品名称',
+  `sku_name`      VARCHAR(255)    NOT NULL DEFAULT '' COMMENT 'SKU名称',
+  `quantity`      INT             NOT NULL DEFAULT 0 COMMENT '数量',
+  `price`         DECIMAL(12,2)   NOT NULL DEFAULT 0.00 COMMENT '单价',
+  `total_fee`     DECIMAL(12,2)   NOT NULL DEFAULT 0.00 COMMENT '小计',
+  `refund_status` VARCHAR(32)     NOT NULL DEFAULT '' COMMENT '退款状态',
+  `pic_url`       VARCHAR(512)    NOT NULL DEFAULT '' COMMENT '商品图片URL',
+  `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_trade_uid` (`trade_uid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单明细表';
+
+-- 店铺表（从订单自动提取）
+CREATE TABLE `shop` (
+  `id`         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `shop_name`  VARCHAR(128)    NOT NULL COMMENT '店铺名称',
+  `platform`   VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '所属平台',
+  `created_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_shop_name` (`shop_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='店铺表';
+
+-- 账号-店铺权限表
+CREATE TABLE `account_shop` (
+  `id`         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_id` BIGINT UNSIGNED NOT NULL COMMENT '账号ID',
+  `shop_id`    BIGINT UNSIGNED NOT NULL COMMENT '店铺ID',
+  `created_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_account_shop` (`account_id`, `shop_id`),
+  KEY `idx_shop_id` (`shop_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='账号店铺权限表';
+
+-- 同步状态表
+CREATE TABLE `sync_state` (
+  `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `sync_type`      VARCHAR(64)     NOT NULL COMMENT '同步类型',
+  `last_sync_time` DATETIME        NOT NULL COMMENT '最后同步时间',
+  `updated_at`     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_sync_type` (`sync_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='同步状态表';
+
+-- ------------------------------------------------------------
 -- 2. 产品管理模块
 -- ------------------------------------------------------------
 

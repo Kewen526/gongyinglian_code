@@ -66,18 +66,26 @@ func main() {
 	// ---------- Repository Layer ----------
 	accountRepo := repository.NewAccountRepo(db)
 	productRepo := repository.NewProductRepo(db)
+	orderRepo := repository.NewOrderRepo(db)
+	shopRepo := repository.NewShopRepo(db)
 
 	// ---------- Service Layer ----------
 	accountService := service.NewAccountService(accountRepo)
 	productService := service.NewProductService(productRepo)
+	orderService := service.NewOrderService(orderRepo, shopRepo)
+	syncService := service.NewSyncService(orderRepo, shopRepo, &cfg.WanLiNiu)
 
 	// ---------- Handler Layer ----------
 	accountHandler := handler.NewAccountHandler(accountService)
 	productHandler := handler.NewProductHandler(productService)
 	uploadHandler := handler.NewUploadHandler()
+	orderHandler := handler.NewOrderHandler(orderService, syncService)
+
+	// ---------- Start Order Sync ----------
+	syncService.Start()
 
 	// ---------- Router ----------
-	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, accountRepo)
+	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, orderHandler, accountRepo)
 
 	// ---------- Start Server ----------
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
