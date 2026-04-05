@@ -9,6 +9,7 @@ import (
 	"supply-chain/internal/es"
 	"supply-chain/internal/handler"
 	"supply-chain/internal/model"
+	"supply-chain/internal/oss"
 	"supply-chain/internal/repository"
 	"supply-chain/internal/router"
 	"supply-chain/internal/service"
@@ -53,6 +54,10 @@ func main() {
 	// ---------- Auto-create super admin ----------
 	initSuperAdmin(db)
 
+	// ---------- Tencent Cloud COS ----------
+	oss.InitCOS(&cfg.COS)
+	log.Println("[COS] Initialized")
+
 	// ---------- Elasticsearch ----------
 	if err := es.InitES(&cfg.Elasticsearch); err != nil {
 		log.Printf("[ES] Warning: failed to connect to ES: %v (search features will be unavailable)\n", err)
@@ -69,9 +74,10 @@ func main() {
 	// ---------- Handler Layer ----------
 	accountHandler := handler.NewAccountHandler(accountService)
 	productHandler := handler.NewProductHandler(productService)
+	uploadHandler := handler.NewUploadHandler()
 
 	// ---------- Router ----------
-	r := router.SetupRouter(accountHandler, productHandler, accountRepo)
+	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, accountRepo)
 
 	// ---------- Start Server ----------
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

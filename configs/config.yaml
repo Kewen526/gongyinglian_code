@@ -16,8 +16,9 @@ jwt:
   secret: "supply-chain-jwt-secret-key-change-in-production"
   expire_hour: 24
 
-oss:
-  endpoint: "oss-cn-hangzhou.aliyuncs.com"
-  access_key_id: "your-access-key-id"
-  access_key_secret: "your-access-key-secret"
-  bucket_name: "your-bucket-name"
+cos:
+  secret_id: "your-secret-id"
+  secret_key: "your-secret-key"
+  region: "ap-beijing"
+  bucket: "your-bucket-name"
+  base_url: ""

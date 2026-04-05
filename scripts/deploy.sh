@@ -103,11 +103,12 @@ cat > "${DEPLOY_DIR}/configs/config.json" <<CFGEOF
     "secret": "${JWT_SECRET}",
     "expire_hour": 24
   },
-  "oss": {
-    "endpoint": "oss-cn-hangzhou.aliyuncs.com",
-    "access_key_id": "",
-    "access_key_secret": "",
-    "bucket_name": ""
+  "cos": {
+    "secret_id": "",
+    "secret_key": "",
+    "region": "ap-beijing",
+    "bucket": "",
+    "base_url": ""
   }
 }
 CFGEOF
