@@ -70,6 +70,7 @@ type AccountDetailResp struct {
 	RealName    string               `json:"real_name"`
 	Role        uint8                `json:"role"`
 	Permissions []PermissionDetail   `json:"permissions"`
+	ShopIDs     []uint64             `json:"shop_ids"`
 	CreatedAt   time.Time            `json:"created_at"`
 }
 

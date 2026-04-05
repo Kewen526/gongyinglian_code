@@ -51,6 +51,18 @@ func main() {
 		"MaxIdle=", cfg.MySQL.MaxIdleConns,
 		"MaxLifetime=", cfg.MySQL.ConnMaxLifetimeMinutes, "min")
 
+	// ---------- Auto-migrate order tables ----------
+	if err := db.AutoMigrate(
+		&model.OrderTrade{},
+		&model.OrderItem{},
+		&model.Shop{},
+		&model.AccountShop{},
+		&model.SyncState{},
+	); err != nil {
+		log.Fatalf("Failed to auto-migrate order tables: %v", err)
+	}
+	log.Println("[MySQL] Order tables migrated")
+
 	// ---------- Auto-create super admin ----------
 	initSuperAdmin(db)
 
@@ -66,18 +78,28 @@ func main() {
 	// ---------- Repository Layer ----------
 	accountRepo := repository.NewAccountRepo(db)
 	productRepo := repository.NewProductRepo(db)
+	orderRepo := repository.NewOrderRepo(db)
+	shopRepo := repository.NewShopRepo(db)
 
 	// ---------- Service Layer ----------
-	accountService := service.NewAccountService(accountRepo)
+	accountService := service.NewAccountService(accountRepo, shopRepo)
 	productService := service.NewProductService(productRepo)
+	orderService := service.NewOrderService(orderRepo, shopRepo)
+	syncService := service.NewSyncService(orderRepo, shopRepo, &cfg.WanLiNiu)
+
+	// ---------- Start auto sync ----------
+	syncService.StartAutoSync()
+	defer syncService.Stop()
+	log.Println("[Sync] Order sync service started")
 
 	// ---------- Handler Layer ----------
 	accountHandler := handler.NewAccountHandler(accountService)
 	productHandler := handler.NewProductHandler(productService)
 	uploadHandler := handler.NewUploadHandler()
+	orderHandler := handler.NewOrderHandler(orderService, syncService)
 
 	// ---------- Router ----------
-	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, accountRepo)
+	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, orderHandler, accountRepo)
 
 	// ---------- Start Server ----------
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

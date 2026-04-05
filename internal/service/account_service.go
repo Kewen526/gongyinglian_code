@@ -10,11 +10,12 @@ import (
 )
 
 type AccountService struct {
-	repo *repository.AccountRepo
+	repo     *repository.AccountRepo
+	shopRepo *repository.ShopRepo
 }
 
-func NewAccountService(repo *repository.AccountRepo) *AccountService {
-	return &AccountService{repo: repo}
+func NewAccountService(repo *repository.AccountRepo, shopRepo *repository.ShopRepo) *AccountService {
+	return &AccountService{repo: repo, shopRepo: shopRepo}
 }
 
 func (s *AccountService) Login(req *model.LoginReq) (*model.Account, error) {
@@ -116,12 +117,25 @@ func (s *AccountService) GetAccountDetail(id uint64) (*model.AccountDetailResp, 
 		})
 	}
 
+	// Get shop permissions
+	var shopIDs []uint64
+	if s.shopRepo != nil {
+		ids, err := s.shopRepo.GetAccountShopIDs(id)
+		if err == nil {
+			shopIDs = ids
+		}
+	}
+	if shopIDs == nil {
+		shopIDs = []uint64{}
+	}
+
 	return &model.AccountDetailResp{
 		ID:          account.ID,
 		Username:    account.Username,
 		RealName:    account.RealName,
 		Role:        account.Role,
 		Permissions: permDetails,
+		ShopIDs:     shopIDs,
 		CreatedAt:   account.CreatedAt,
 	}, nil
 }

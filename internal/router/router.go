@@ -12,6 +12,7 @@ func SetupRouter(
 	accountHandler *handler.AccountHandler,
 	productHandler *handler.ProductHandler,
 	uploadHandler *handler.UploadHandler,
+	orderHandler *handler.OrderHandler,
 	accountRepo *repository.AccountRepo,
 ) *gin.Engine {
 	r := gin.Default()
@@ -40,6 +41,10 @@ func SetupRouter(
 		adminOnly.POST("/accounts", accountHandler.CreateAccount)
 		adminOnly.GET("/accounts/:id", accountHandler.GetAccountDetail)
 		adminOnly.PUT("/accounts/:id/permissions", accountHandler.UpdatePermissions)
+
+		// Shop permissions for accounts (super admin only)
+		adminOnly.GET("/accounts/:id/shops", orderHandler.GetAccountShops)
+		adminOnly.PUT("/accounts/:id/shops", orderHandler.UpdateAccountShops)
 	}
 
 	// --- Modules (any logged-in user) ---
@@ -87,6 +92,27 @@ func SetupRouter(
 		// ES Full Reindex (edit permission required)
 		productEdit.POST("/products/reindex", productHandler.FullReindex)
 	}
+
+	// --- Order: view permission ---
+	orderView := auth.Group("")
+	orderView.Use(middleware.RequireModulePermission(accountRepo, "order", false))
+	{
+		orderView.GET("/orders", orderHandler.ListOrders)
+		orderView.GET("/orders/:id", orderHandler.GetOrderDetail)
+		orderView.GET("/orders/status-options", orderHandler.GetStatusOptions)
+	}
+
+	// --- Order: edit permission (sync) ---
+	orderEdit := auth.Group("")
+	orderEdit.Use(middleware.RequireModulePermission(accountRepo, "order", true))
+	{
+		orderEdit.POST("/orders/sync", orderHandler.SyncOrders)
+	}
+
+	// --- Shop/Platform queries (any logged-in user with order view) ---
+	orderView.GET("/shops", orderHandler.ListShops)
+	orderView.GET("/shops/grouped", orderHandler.ListShopsGrouped)
+	orderView.GET("/platforms", orderHandler.ListPlatforms)
 
 	return r
 }
