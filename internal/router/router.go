@@ -11,9 +11,13 @@ import (
 func SetupRouter(
 	accountHandler *handler.AccountHandler,
 	productHandler *handler.ProductHandler,
+	uploadHandler *handler.UploadHandler,
 	accountRepo *repository.AccountRepo,
 ) *gin.Engine {
 	r := gin.Default()
+
+	// Set max multipart memory to 200MB for file uploads
+	r.MaxMultipartMemory = 200 << 20
 
 	api := r.Group("/api/v1")
 
@@ -23,6 +27,11 @@ func SetupRouter(
 	// ========== Authenticated routes ==========
 	auth := api.Group("")
 	auth.Use(middleware.JWTAuth())
+
+	// --- Upload (any logged-in user) ---
+	auth.POST("/upload/image", uploadHandler.UploadImage)
+	auth.POST("/upload/video", uploadHandler.UploadVideo)
+	auth.POST("/upload/file", uploadHandler.UploadFile)
 
 	// --- Account management (super admin only) ---
 	adminOnly := auth.Group("")

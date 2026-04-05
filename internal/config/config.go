@@ -9,7 +9,7 @@ type Config struct {
 	Server        ServerConfig        `json:"server"`
 	MySQL         MySQLConfig         `json:"mysql"`
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
-	OSS           OSSConfig           `json:"oss"`
+	COS           COSConfig           `json:"cos"`
 	JWT           JWTConfig           `json:"jwt"`
 }
 
@@ -36,11 +36,12 @@ type ElasticsearchConfig struct {
 	ProductIndex string   `json:"product_index"`
 }
 
-type OSSConfig struct {
-	Endpoint        string `json:"endpoint"`
-	AccessKeyID     string `json:"access_key_id"`
-	AccessKeySecret string `json:"access_key_secret"`
-	BucketName      string `json:"bucket_name"`
+type COSConfig struct {
+	SecretID  string `json:"secret_id"`
+	SecretKey string `json:"secret_key"`
+	Region    string `json:"region"`
+	Bucket    string `json:"bucket"`
+	BaseURL   string `json:"base_url"`
 }
 
 var GlobalConfig *Config
@@ -72,11 +73,12 @@ func DefaultConfig() *Config {
 			Addresses:    []string{"http://127.0.0.1:9200"},
 			ProductIndex: "products",
 		},
-		OSS: OSSConfig{
-			Endpoint:        "oss-cn-hangzhou.aliyuncs.com",
-			AccessKeyID:     "",
-			AccessKeySecret: "",
-			BucketName:      "",
+		COS: COSConfig{
+			SecretID:  "",
+			SecretKey: "",
+			Region:    "ap-beijing",
+			Bucket:    "",
+			BaseURL:   "",
 		},
 		JWT: JWTConfig{
 			Secret:     "supply-chain-jwt-secret-key-change-in-production",
