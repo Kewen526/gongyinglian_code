@@ -11,6 +11,14 @@ type Config struct {
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
 	COS           COSConfig           `json:"cos"`
 	JWT           JWTConfig           `json:"jwt"`
+	WanLiNiu      WanLiNiuConfig      `json:"wanliniu"`
+}
+
+type WanLiNiuConfig struct {
+	AppKey       string `json:"app_key"`
+	Secret       string `json:"secret"`
+	BaseURL      string `json:"base_url"`
+	SyncInterval int    `json:"sync_interval_seconds"` // sync interval in seconds, default 60
 }
 
 type JWTConfig struct {
@@ -83,6 +91,12 @@ func DefaultConfig() *Config {
 		JWT: JWTConfig{
 			Secret:     "supply-chain-jwt-secret-key-change-in-production",
 			ExpireHour: 24,
+		},
+		WanLiNiu: WanLiNiuConfig{
+			AppKey:       "3463852133",
+			Secret:       "0e9798a3ace75d01f488dfeaf3f1c2e2",
+			BaseURL:      "https://open-api.hupun.com/api",
+			SyncInterval: 60,
 		},
 	}
 	GlobalConfig = cfg
