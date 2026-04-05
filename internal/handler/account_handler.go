@@ -53,6 +53,22 @@ func (h *AccountHandler) Login(c *gin.Context) {
 	})
 }
 
+// GET /api/v1/accounts (requires super admin)
+func (h *AccountHandler) ListAccounts(c *gin.Context) {
+	var req model.AccountListReq
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	result, err := h.svc.ListAccounts(req.Page, req.PageSize)
+	if err != nil {
+		response.InternalError(c, "查询账号列表失败: "+err.Error())
+		return
+	}
+	response.Success(c, result)
+}
+
 // POST /api/v1/accounts (requires super admin)
 func (h *AccountHandler) CreateAccount(c *gin.Context) {
 	var req model.CreateAccountReq

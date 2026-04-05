@@ -73,6 +73,28 @@ func (r *AccountRepo) GetModulesByIDs(ids []uint64) ([]model.Module, error) {
 	return modules, err
 }
 
+// ListAccounts returns paginated accounts.
+func (r *AccountRepo) ListAccounts(page, pageSize int) ([]model.Account, int64, error) {
+	var total int64
+	if err := r.db.Model(&model.Account{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+
+	var accounts []model.Account
+	err := r.db.Order("id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&accounts).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return accounts, total, nil
+}
+
 func (r *AccountRepo) CreateAccountWithPermissions(account *model.Account, permissions []model.AccountPermission) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(account).Error; err != nil {

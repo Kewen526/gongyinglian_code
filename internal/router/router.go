@@ -38,6 +38,7 @@ func SetupRouter(
 	adminOnly := auth.Group("")
 	adminOnly.Use(middleware.RequireSuperAdmin())
 	{
+		adminOnly.GET("/accounts", accountHandler.ListAccounts)
 		adminOnly.POST("/accounts", accountHandler.CreateAccount)
 		adminOnly.GET("/accounts/:id", accountHandler.GetAccountDetail)
 		adminOnly.PUT("/accounts/:id/permissions", accountHandler.UpdatePermissions)

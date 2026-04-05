@@ -82,6 +82,16 @@ type PermissionDetail struct {
 	CanEdit    uint8  `json:"can_edit"`
 }
 
+type AccountListReq struct {
+	Page     int `form:"page"`
+	PageSize int `form:"page_size"`
+}
+
+type AccountListResp struct {
+	Total int64              `json:"total"`
+	List  []AccountDetailResp `json:"list"`
+}
+
 // ---------- Login DTOs ----------
 
 type LoginReq struct {

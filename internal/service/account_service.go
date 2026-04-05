@@ -77,6 +77,28 @@ func (s *AccountService) GetAllModules() ([]model.Module, error) {
 	return s.repo.GetAllModules()
 }
 
+// ListAccounts returns a paginated list of accounts with their permissions and shop_ids.
+func (s *AccountService) ListAccounts(page, pageSize int) (*model.AccountListResp, error) {
+	accounts, total, err := s.repo.ListAccounts(page, pageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]model.AccountDetailResp, 0, len(accounts))
+	for _, acc := range accounts {
+		detail, err := s.GetAccountDetail(acc.ID)
+		if err != nil {
+			continue
+		}
+		list = append(list, *detail)
+	}
+
+	return &model.AccountListResp{
+		Total: total,
+		List:  list,
+	}, nil
+}
+
 func (s *AccountService) GetAccountDetail(id uint64) (*model.AccountDetailResp, error) {
 	account, err := s.repo.GetByID(id)
 	if err != nil {
