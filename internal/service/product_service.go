@@ -34,7 +34,57 @@ func (s *ProductService) CreateProduct(req *model.CreateProductReq) (*model.Prod
 		PatentStatus: req.PatentStatus,
 		FactoryPrice: req.FactoryPrice,
 	}
-	if err := s.repo.Create(p); err != nil {
+
+	specs := make([]model.ProductSpec, 0, len(req.Specs))
+	for _, sp := range req.Specs {
+		specs = append(specs, model.ProductSpec{
+			SizeModel:  sp.SizeModel,
+			Dimension:  sp.Dimension,
+			Weight:     sp.Weight,
+			BoxSpec:    sp.BoxSpec,
+			PackingQty: sp.PackingQty,
+		})
+	}
+	prices := make([]model.ProductPlatformPrice, 0, len(req.PlatformPrices))
+	for _, pp := range req.PlatformPrices {
+		currency := pp.Currency
+		if currency == "" {
+			currency = "CNY"
+		}
+		prices = append(prices, model.ProductPlatformPrice{
+			PlatformName: pp.PlatformName,
+			ControlPrice: pp.ControlPrice,
+			Currency:     currency,
+		})
+	}
+	skus := make([]model.ProductSKU, 0, len(req.SKUs))
+	for _, sk := range req.SKUs {
+		skus = append(skus, model.ProductSKU{
+			Model:   sk.Model,
+			Size:    sk.Size,
+			SKUCode: sk.SKUCode,
+		})
+	}
+	images := make([]model.ProductDetailImage, 0, len(req.DetailImages))
+	for i, img := range req.DetailImages {
+		sort := img.SortOrder
+		if sort == 0 {
+			sort = uint(i)
+		}
+		images = append(images, model.ProductDetailImage{
+			ImageURL:  img.ImageURL,
+			SortOrder: sort,
+		})
+	}
+	videos := make([]model.ProductVideo, 0, len(req.Videos))
+	for _, v := range req.Videos {
+		videos = append(videos, model.ProductVideo{
+			VideoURL: v.VideoURL,
+			CoverURL: v.CoverURL,
+		})
+	}
+
+	if err := s.repo.CreateWithDetails(p, specs, prices, skus, images, videos); err != nil {
 		return nil, err
 	}
 
@@ -106,11 +156,82 @@ func (s *ProductService) UpdateProduct(id uint64, req *model.UpdateProductReq) e
 		updates["factory_price"] = *req.FactoryPrice
 	}
 
-	if len(updates) == 0 {
+	// Convert sub-resource pointers to model pointers for UpdateWithDetails.
+	var specsPtr *[]model.ProductSpec
+	if req.Specs != nil {
+		specs := make([]model.ProductSpec, 0, len(*req.Specs))
+		for _, sp := range *req.Specs {
+			specs = append(specs, model.ProductSpec{
+				SizeModel:  sp.SizeModel,
+				Dimension:  sp.Dimension,
+				Weight:     sp.Weight,
+				BoxSpec:    sp.BoxSpec,
+				PackingQty: sp.PackingQty,
+			})
+		}
+		specsPtr = &specs
+	}
+	var pricesPtr *[]model.ProductPlatformPrice
+	if req.PlatformPrices != nil {
+		prices := make([]model.ProductPlatformPrice, 0, len(*req.PlatformPrices))
+		for _, pp := range *req.PlatformPrices {
+			currency := pp.Currency
+			if currency == "" {
+				currency = "CNY"
+			}
+			prices = append(prices, model.ProductPlatformPrice{
+				PlatformName: pp.PlatformName,
+				ControlPrice: pp.ControlPrice,
+				Currency:     currency,
+			})
+		}
+		pricesPtr = &prices
+	}
+	var skusPtr *[]model.ProductSKU
+	if req.SKUs != nil {
+		skus := make([]model.ProductSKU, 0, len(*req.SKUs))
+		for _, sk := range *req.SKUs {
+			skus = append(skus, model.ProductSKU{
+				Model:   sk.Model,
+				Size:    sk.Size,
+				SKUCode: sk.SKUCode,
+			})
+		}
+		skusPtr = &skus
+	}
+	var imagesPtr *[]model.ProductDetailImage
+	if req.DetailImages != nil {
+		images := make([]model.ProductDetailImage, 0, len(*req.DetailImages))
+		for i, img := range *req.DetailImages {
+			sort := img.SortOrder
+			if sort == 0 {
+				sort = uint(i)
+			}
+			images = append(images, model.ProductDetailImage{
+				ImageURL:  img.ImageURL,
+				SortOrder: sort,
+			})
+		}
+		imagesPtr = &images
+	}
+	var videosPtr *[]model.ProductVideo
+	if req.Videos != nil {
+		videos := make([]model.ProductVideo, 0, len(*req.Videos))
+		for _, v := range *req.Videos {
+			videos = append(videos, model.ProductVideo{
+				VideoURL: v.VideoURL,
+				CoverURL: v.CoverURL,
+			})
+		}
+		videosPtr = &videos
+	}
+
+	// Nothing to do?
+	if len(updates) == 0 && specsPtr == nil && pricesPtr == nil && skusPtr == nil && imagesPtr == nil && videosPtr == nil {
 		return nil
 	}
 
-	if err := s.repo.Update(id, updates); err != nil {
+	if err := s.repo.UpdateWithDetails(id, updates, specsPtr, pricesPtr, skusPtr, imagesPtr, videosPtr); err != nil {
 		return err
 	}
 

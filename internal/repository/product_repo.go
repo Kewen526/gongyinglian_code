@@ -20,6 +20,152 @@ func (r *ProductRepo) Create(p *model.Product) error {
 	return r.db.Create(p).Error
 }
 
+// CreateWithDetails creates a product and all provided sub-resources in a single transaction.
+// Sub-resource slices may be empty/nil.
+func (r *ProductRepo) CreateWithDetails(
+	p *model.Product,
+	specs []model.ProductSpec,
+	prices []model.ProductPlatformPrice,
+	skus []model.ProductSKU,
+	images []model.ProductDetailImage,
+	videos []model.ProductVideo,
+) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(p).Error; err != nil {
+			return err
+		}
+		pid := p.ID
+		if len(specs) > 0 {
+			for i := range specs {
+				specs[i].ProductID = pid
+			}
+			if err := tx.Create(&specs).Error; err != nil {
+				return err
+			}
+		}
+		if len(prices) > 0 {
+			for i := range prices {
+				prices[i].ProductID = pid
+			}
+			if err := tx.Create(&prices).Error; err != nil {
+				return err
+			}
+		}
+		if len(skus) > 0 {
+			for i := range skus {
+				skus[i].ProductID = pid
+			}
+			if err := tx.Create(&skus).Error; err != nil {
+				return err
+			}
+		}
+		if len(images) > 0 {
+			for i := range images {
+				images[i].ProductID = pid
+			}
+			if err := tx.Create(&images).Error; err != nil {
+				return err
+			}
+		}
+		if len(videos) > 0 {
+			for i := range videos {
+				videos[i].ProductID = pid
+			}
+			if err := tx.Create(&videos).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// UpdateWithDetails updates product fields and optionally replaces sub-resources.
+// A non-nil slice pointer means "replace all": existing rows for that type are deleted
+// and the new list is inserted (empty list clears it). Nil pointer leaves existing rows alone.
+func (r *ProductRepo) UpdateWithDetails(
+	id uint64,
+	updates map[string]interface{},
+	specs *[]model.ProductSpec,
+	prices *[]model.ProductPlatformPrice,
+	skus *[]model.ProductSKU,
+	images *[]model.ProductDetailImage,
+	videos *[]model.ProductVideo,
+) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if len(updates) > 0 {
+			if err := tx.Model(&model.Product{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		if specs != nil {
+			if err := tx.Where("product_id = ?", id).Delete(&model.ProductSpec{}).Error; err != nil {
+				return err
+			}
+			if len(*specs) > 0 {
+				for i := range *specs {
+					(*specs)[i].ProductID = id
+				}
+				if err := tx.Create(specs).Error; err != nil {
+					return err
+				}
+			}
+		}
+		if prices != nil {
+			if err := tx.Where("product_id = ?", id).Delete(&model.ProductPlatformPrice{}).Error; err != nil {
+				return err
+			}
+			if len(*prices) > 0 {
+				for i := range *prices {
+					(*prices)[i].ProductID = id
+				}
+				if err := tx.Create(prices).Error; err != nil {
+					return err
+				}
+			}
+		}
+		if skus != nil {
+			if err := tx.Where("product_id = ?", id).Delete(&model.ProductSKU{}).Error; err != nil {
+				return err
+			}
+			if len(*skus) > 0 {
+				for i := range *skus {
+					(*skus)[i].ProductID = id
+				}
+				if err := tx.Create(skus).Error; err != nil {
+					return err
+				}
+			}
+		}
+		if images != nil {
+			if err := tx.Where("product_id = ?", id).Delete(&model.ProductDetailImage{}).Error; err != nil {
+				return err
+			}
+			if len(*images) > 0 {
+				for i := range *images {
+					(*images)[i].ProductID = id
+				}
+				if err := tx.Create(images).Error; err != nil {
+					return err
+				}
+			}
+		}
+		if videos != nil {
+			if err := tx.Where("product_id = ?", id).Delete(&model.ProductVideo{}).Error; err != nil {
+				return err
+			}
+			if len(*videos) > 0 {
+				for i := range *videos {
+					(*videos)[i].ProductID = id
+				}
+				if err := tx.Create(videos).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
 func (r *ProductRepo) GetByID(id uint64) (*model.Product, error) {
 	var p model.Product
 	if err := r.db.First(&p, id).Error; err != nil {

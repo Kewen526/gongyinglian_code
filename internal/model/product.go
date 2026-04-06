@@ -104,6 +104,12 @@ type CreateProductReq struct {
 	Material     string  `json:"material"`
 	PatentStatus string  `json:"patent_status"`
 	FactoryPrice float64 `json:"factory_price"`
+	// Optional nested sub-resources: if provided, they are created together with the product.
+	Specs          []CreateSpecReq          `json:"specs"`
+	PlatformPrices []CreatePlatformPriceReq `json:"platform_prices"`
+	SKUs           []CreateSKUReq           `json:"skus"`
+	DetailImages   []CreateDetailImageReq   `json:"detail_images"`
+	Videos         []CreateVideoReq         `json:"videos"`
 }
 
 type UpdateProductReq struct {
@@ -118,6 +124,14 @@ type UpdateProductReq struct {
 	Material     *string  `json:"material"`
 	PatentStatus *string  `json:"patent_status"`
 	FactoryPrice *float64 `json:"factory_price"`
+	// Optional nested sub-resources: if provided (non-nil), existing rows are FULLY REPLACED
+	// with the new list. Passing an empty array clears that sub-resource. Omitting the field
+	// leaves existing rows untouched.
+	Specs          *[]CreateSpecReq          `json:"specs"`
+	PlatformPrices *[]CreatePlatformPriceReq `json:"platform_prices"`
+	SKUs           *[]CreateSKUReq           `json:"skus"`
+	DetailImages   *[]CreateDetailImageReq   `json:"detail_images"`
+	Videos         *[]CreateVideoReq         `json:"videos"`
 }
 
 type ProductListReq struct {
