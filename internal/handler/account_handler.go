@@ -112,6 +112,42 @@ func (h *AccountHandler) GetAccountDetail(c *gin.Context) {
 	response.Success(c, detail)
 }
 
+// PUT /api/v1/accounts/:id (requires super admin)
+func (h *AccountHandler) UpdateAccount(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的账号ID")
+		return
+	}
+
+	var req model.UpdateAccountReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+
+	if err := h.svc.UpdateAccount(id, &req); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
+// DELETE /api/v1/accounts/:id (requires super admin)
+func (h *AccountHandler) DeleteAccount(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的账号ID")
+		return
+	}
+
+	if err := h.svc.DeleteAccount(id); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
 // PUT /api/v1/accounts/:id/permissions (requires super admin)
 func (h *AccountHandler) UpdatePermissions(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)

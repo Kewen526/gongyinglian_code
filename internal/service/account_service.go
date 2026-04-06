@@ -162,6 +162,66 @@ func (s *AccountService) GetAccountDetail(id uint64) (*model.AccountDetailResp, 
 	}, nil
 }
 
+// UpdateAccount updates account basic info (username/password/real_name/role).
+func (s *AccountService) UpdateAccount(id uint64, req *model.UpdateAccountReq) error {
+	// Verify account exists
+	existing, err := s.repo.GetByID(id)
+	if err != nil {
+		return err
+	}
+
+	updates := make(map[string]interface{})
+
+	if req.Username != nil && *req.Username != existing.Username {
+		// Check if new username is taken
+		other, err := s.repo.GetByUsername(*req.Username)
+		if err == nil && other.ID != id {
+			return errors.New("用户名已存在")
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		updates["username"] = *req.Username
+	}
+
+	if req.Password != nil && *req.Password != "" {
+		if len(*req.Password) < 6 {
+			return errors.New("密码至少6位")
+		}
+		hashed, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		updates["password"] = string(hashed)
+	}
+
+	if req.RealName != nil {
+		updates["real_name"] = *req.RealName
+	}
+
+	if req.Role != nil {
+		updates["role"] = *req.Role
+	}
+
+	if len(updates) == 0 {
+		return nil
+	}
+
+	return s.repo.UpdateAccount(id, updates)
+}
+
+// DeleteAccount deletes an account. Super admin cannot be deleted.
+func (s *AccountService) DeleteAccount(id uint64) error {
+	account, err := s.repo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if account.Role == model.RoleSuperAdmin {
+		return errors.New("超级管理员账号不可删除")
+	}
+	return s.repo.DeleteAccount(id)
+}
+
 func (s *AccountService) UpdatePermissions(accountID uint64, req *model.UpdatePermissionsReq) error {
 	// Verify account exists
 	_, err := s.repo.GetByID(accountID)

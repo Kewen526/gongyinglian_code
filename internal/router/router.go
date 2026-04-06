@@ -41,6 +41,8 @@ func SetupRouter(
 		adminOnly.GET("/accounts", accountHandler.ListAccounts)
 		adminOnly.POST("/accounts", accountHandler.CreateAccount)
 		adminOnly.GET("/accounts/:id", accountHandler.GetAccountDetail)
+		adminOnly.PUT("/accounts/:id", accountHandler.UpdateAccount)
+		adminOnly.DELETE("/accounts/:id", accountHandler.DeleteAccount)
 		adminOnly.PUT("/accounts/:id/permissions", accountHandler.UpdatePermissions)
 
 		// Shop permissions for accounts (super admin only)

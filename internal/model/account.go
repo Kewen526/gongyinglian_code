@@ -60,6 +60,13 @@ type PermissionItem struct {
 	CanEdit  uint8  `json:"can_edit"`
 }
 
+type UpdateAccountReq struct {
+	Username *string `json:"username"`
+	Password *string `json:"password"`
+	RealName *string `json:"real_name"`
+	Role     *uint8  `json:"role" binding:"omitempty,oneof=0 1 2 3"`
+}
+
 type UpdatePermissionsReq struct {
 	Permissions []PermissionItem `json:"permissions" binding:"required"`
 }

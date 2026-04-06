@@ -95,6 +95,24 @@ func (r *AccountRepo) ListAccounts(page, pageSize int) ([]model.Account, int64, 
 	return accounts, total, nil
 }
 
+// UpdateAccount updates the given fields of an account.
+func (r *AccountRepo) UpdateAccount(id uint64, updates map[string]interface{}) error {
+	return r.db.Model(&model.Account{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// DeleteAccount deletes an account and all its permission/shop associations.
+func (r *AccountRepo) DeleteAccount(id uint64) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("account_id = ?", id).Delete(&model.AccountPermission{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("account_id = ?", id).Delete(&model.AccountShop{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.Account{}, id).Error
+	})
+}
+
 func (r *AccountRepo) CreateAccountWithPermissions(account *model.Account, permissions []model.AccountPermission) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(account).Error; err != nil {
