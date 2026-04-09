@@ -134,44 +134,32 @@ func SearchProducts(ctx context.Context, index string, req *model.ProductListReq
 	must := []map[string]interface{}{}
 	filter := []map[string]interface{}{}
 
-	// Fuzzy text searches in must (for relevance)
+	// Prefix searches on .keyword (precise, no fuzziness)
 	if req.Name != "" {
 		must = append(must, map[string]interface{}{
-			"match": map[string]interface{}{
-				"name": map[string]interface{}{
-					"query":     req.Name,
-					"fuzziness": "AUTO",
-				},
+			"prefix": map[string]interface{}{
+				"name.keyword": req.Name,
 			},
 		})
 	}
 	if req.ProductCode != "" {
 		must = append(must, map[string]interface{}{
-			"match": map[string]interface{}{
-				"product_code": map[string]interface{}{
-					"query":     req.ProductCode,
-					"fuzziness": "AUTO",
-				},
+			"prefix": map[string]interface{}{
+				"product_code.keyword": req.ProductCode,
 			},
 		})
 	}
 	if req.Supplier != "" {
 		must = append(must, map[string]interface{}{
-			"match": map[string]interface{}{
-				"supplier": map[string]interface{}{
-					"query":     req.Supplier,
-					"fuzziness": "AUTO",
-				},
+			"prefix": map[string]interface{}{
+				"supplier.keyword": req.Supplier,
 			},
 		})
 	}
 	if req.GroupName != "" {
 		must = append(must, map[string]interface{}{
-			"match": map[string]interface{}{
-				"group_name": map[string]interface{}{
-					"query":     req.GroupName,
-					"fuzziness": "AUTO",
-				},
+			"prefix": map[string]interface{}{
+				"group_name.keyword": req.GroupName,
 			},
 		})
 	}
