@@ -117,6 +117,7 @@ func SetupRouter(
 	// --- Shop/Platform queries (any logged-in user with order view) ---
 	orderView.GET("/shops", orderHandler.ListShops)
 	orderView.GET("/shops/grouped", orderHandler.ListShopsGrouped)
+	orderView.GET("/shops/occupied", orderHandler.GetOccupiedShopIDs)
 	orderView.GET("/platforms", orderHandler.ListPlatforms)
 
 	return r
