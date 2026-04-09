@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	syncKey           = "order_sync"
-	tradeListPath     = "/erp/opentrade/list/trades"
-	maxPageSize       = 200
-	initialSyncDays   = 7 // first sync pulls last 7 days
+	syncKey        = "order_sync"
+	tradeListPath  = "/erp/opentrade/list/trades"
+	batchMarkPath  = "/erp/opentrade/modify/batch/mark"
+	maxPageSize    = 200
+	initialSyncDays = 7 // first sync pulls last 7 days
 )
 
 type SyncService struct {
@@ -535,4 +536,72 @@ func getBool(m map[string]interface{}, key string) bool {
 	default:
 		return false
 	}
+}
+
+// BatchMarkOrders sends a batch mark request to WanLiNiu.
+func (s *SyncService) BatchMarkOrders(items []model.MarkItem) error {
+	type markReqItem struct {
+		BillCode string `json:"bill_code"`
+		MarkName string `json:"mark_name"`
+		Type     int    `json:"type"`
+	}
+
+	reqItems := make([]markReqItem, len(items))
+	for i, item := range items {
+		reqItems[i] = markReqItem{
+			BillCode: item.BillCode,
+			MarkName: item.MarkName,
+			Type:     item.Type,
+		}
+	}
+
+	batchJSON, err := json.Marshal(reqItems)
+	if err != nil {
+		return fmt.Errorf("marshal batch_mark_requests: %w", err)
+	}
+
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	allParams := map[string]string{
+		"_app":                s.cfg.AppKey,
+		"_t":                  timestamp,
+		"batch_mark_requests": string(batchJSON),
+	}
+	allParams["_sign"] = buildSign(allParams, s.cfg.Secret)
+
+	form := url.Values{}
+	for k, v := range allParams {
+		form.Set(k, v)
+	}
+
+	resp, err := http.Post(
+		s.cfg.BaseURL+batchMarkPath,
+		"application/x-www-form-urlencoded",
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		return fmt.Errorf("http post: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read body: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("json unmarshal: %w", err)
+	}
+
+	code, ok := result["code"]
+	if !ok {
+		return fmt.Errorf("unexpected response: %s", string(body))
+	}
+	codeFloat, _ := code.(float64)
+	if int(codeFloat) != 0 {
+		msg, _ := result["message"].(string)
+		return fmt.Errorf("wanliniu error %d: %s", int(codeFloat), msg)
+	}
+
+	return nil
 }
