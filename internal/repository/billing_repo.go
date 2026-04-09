@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"errors"
+	"math"
 	"supply-chain/internal/model"
 	"time"
 
@@ -107,6 +109,237 @@ func (r *BillingRepo) CreateBillingRecord(tx *gorm.DB, rec *model.BillingRecord)
 }
 
 func (r *BillingRepo) DB() *gorm.DB { return r.db }
+
+// ---------- Admin: Finance Overview ----------
+
+// GetTotalBalance returns the sum of all wallet balances.
+func (r *BillingRepo) GetTotalBalance() (float64, error) {
+	var total float64
+	err := r.db.Model(&model.Wallet{}).Select("COALESCE(SUM(balance), 0)").Scan(&total).Error
+	return total, err
+}
+
+// GetTodayApprovedRechargeTotal returns the sum of approved recharges today.
+func (r *BillingRepo) GetTodayApprovedRechargeTotal() (float64, error) {
+	today := time.Now().Format("2006-01-02")
+	var total float64
+	err := r.db.Model(&model.RechargeRequest{}).
+		Where("status = 'approved' AND DATE(created_at) = ?", today).
+		Select("COALESCE(SUM(amount), 0)").
+		Scan(&total).Error
+	return total, err
+}
+
+// ---------- Admin: Recharge Requests ----------
+
+// ListRechargeRequests returns paginated recharge requests with optional status filter.
+func (r *BillingRepo) ListRechargeRequests(req *model.AdminRechargeListReq) ([]model.RechargeRequest, int64, error) {
+	q := r.db.Model(&model.RechargeRequest{})
+	if req.Status != "" {
+		q = q.Where("status = ?", req.Status)
+	}
+	if req.StartDate != "" {
+		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
+	}
+	if req.EndDate != "" {
+		q = q.Where("created_at <= ?", req.EndDate+" 23:59:59")
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	page, pageSize := req.Page, req.PageSize
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	var records []model.RechargeRequest
+	err := q.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&records).Error
+	return records, total, err
+}
+
+// GetRechargeRequestByID returns a single recharge request by ID.
+func (r *BillingRepo) GetRechargeRequestByID(id uint64) (*model.RechargeRequest, error) {
+	var req model.RechargeRequest
+	if err := r.db.First(&req, id).Error; err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
+
+// ApproveRecharge approves a pending recharge request in a single transaction.
+// It adds the amount to the wallet balance and writes a billing_record.
+func (r *BillingRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amount float64, flowNo string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// Atomic status check: only update if still pending
+		result := tx.Model(&model.RechargeRequest{}).
+			Where("id = ? AND status = 'pending'", rechargeID).
+			Update("status", "approved")
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("该充值申请已处理或不存在")
+		}
+
+		// Get or create wallet
+		var balanceBefore, balanceAfter float64
+		var w model.Wallet
+		err := tx.Where("account_id = ?", accountID).First(&w).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			balanceBefore = 0
+			balanceAfter = math.Round(amount*100) / 100
+			rate, level := model.CalcDiscount(amount)
+			if err := tx.Create(&model.Wallet{
+				AccountID:    accountID,
+				Balance:      balanceAfter,
+				DiscountRate: rate,
+				Level:        level,
+			}).Error; err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		} else {
+			balanceBefore = w.Balance
+			balanceAfter = math.Round((w.Balance+amount)*100) / 100
+			if err := tx.Model(&model.Wallet{}).
+				Where("account_id = ?", accountID).
+				Update("balance", balanceAfter).Error; err != nil {
+				return err
+			}
+		}
+
+		// Write billing record
+		return tx.Create(&model.BillingRecord{
+			FlowNo:        flowNo,
+			AccountID:     accountID,
+			Type:          "recharge",
+			Status:        "success",
+			ActualAmount:  amount,
+			DiscountRate:  1.0,
+			BalanceBefore: balanceBefore,
+			BalanceAfter:  balanceAfter,
+		}).Error
+	})
+}
+
+// RejectRecharge rejects a pending recharge request.
+func (r *BillingRepo) RejectRecharge(id uint64, remark string) error {
+	result := r.db.Model(&model.RechargeRequest{}).
+		Where("id = ? AND status = 'pending'", id).
+		Updates(map[string]interface{}{"status": "rejected", "remark": remark})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("该充值申请已处理或不存在")
+	}
+	return nil
+}
+
+// ---------- Admin: All Billing Records ----------
+
+// AccountBasic holds minimal account info for display.
+type AccountBasic struct {
+	ID       uint64
+	Username string
+	RealName string
+}
+
+// GetAccountInfoByIDs fetches username and real_name for a set of account IDs.
+func (r *BillingRepo) GetAccountInfoByIDs(ids []uint64) (map[uint64]AccountBasic, error) {
+	result := make(map[uint64]AccountBasic)
+	if len(ids) == 0 {
+		return result, nil
+	}
+	rows, err := r.db.Table("account").Select("id, username, real_name").Where("id IN ?", ids).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a AccountBasic
+		if err := rows.Scan(&a.ID, &a.Username, &a.RealName); err != nil {
+			continue
+		}
+		result[a.ID] = a
+	}
+	return result, nil
+}
+
+// ListAllBillingRecords returns paginated billing records for all accounts (admin view).
+func (r *BillingRepo) ListAllBillingRecords(req *model.AdminBillingListReq) ([]model.BillingRecord, int64, error) {
+	q := r.db.Model(&model.BillingRecord{})
+	if req.StartDate != "" {
+		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
+	}
+	if req.EndDate != "" {
+		q = q.Where("created_at <= ?", req.EndDate+" 23:59:59")
+	}
+	if req.Type != "" {
+		q = q.Where("type = ?", req.Type)
+	}
+	if req.AccountID > 0 {
+		q = q.Where("account_id = ?", req.AccountID)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	page, pageSize := req.Page, req.PageSize
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	var records []model.BillingRecord
+	err := q.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&records).Error
+	return records, total, err
+}
+
+// GetAllBillingRecordsForExport returns all records matching filters (no pagination, for Excel export).
+func (r *BillingRepo) GetAllBillingRecordsForExport(req *model.AdminBillingListReq) ([]model.BillingRecord, error) {
+	q := r.db.Model(&model.BillingRecord{})
+	if req.StartDate != "" {
+		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
+	}
+	if req.EndDate != "" {
+		q = q.Where("created_at <= ?", req.EndDate+" 23:59:59")
+	}
+	if req.Type != "" {
+		q = q.Where("type = ?", req.Type)
+	}
+	if req.AccountID > 0 {
+		q = q.Where("account_id = ?", req.AccountID)
+	}
+	var records []model.BillingRecord
+	err := q.Order("created_at DESC").Find(&records).Error
+	return records, err
+}
+
+// ---------- Employee: Own Recharge Records ----------
+
+// ListRechargeRequestsByAccountID returns the recharge history for one account.
+func (r *BillingRepo) ListRechargeRequestsByAccountID(accountID uint64, page, pageSize int) ([]model.RechargeRequest, int64, error) {
+	q := r.db.Model(&model.RechargeRequest{}).Where("account_id = ?", accountID)
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	var records []model.RechargeRequest
+	err := q.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&records).Error
+	return records, total, err
+}
 
 // ListBillingRecords queries billing records with filters.
 func (r *BillingRepo) ListBillingRecords(req *model.BillingListReq, accountID uint64) ([]model.BillingRecord, int64, error) {

@@ -57,3 +57,19 @@ func (h *BillingHandler) ListBillingRecords(c *gin.Context) {
 	}
 	response.Success(c, result)
 }
+
+// GET /api/v1/billing/recharge-records
+func (h *BillingHandler) ListMyRechargeRecords(c *gin.Context) {
+	accountID, _ := c.Get("account_id")
+	var req model.MyRechargeListReq
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	result, err := h.billingSvc.ListMyRechargeRecords(accountID.(uint64), &req)
+	if err != nil {
+		response.InternalError(c, "查询失败: "+err.Error())
+		return
+	}
+	response.Success(c, result)
+}
