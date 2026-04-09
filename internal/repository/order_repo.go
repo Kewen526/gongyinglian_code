@@ -203,6 +203,79 @@ func (r *OrderRepo) UpsertSyncState(key string, lastSyncTimeMs int64) error {
 	}).Error
 }
 
+// BatchUpdateTradesByTradeNo updates specified fields for multiple orders in a single transaction.
+// Only non-nil pointer fields in each UpdateOrderItem are written to the database.
+func (r *OrderRepo) BatchUpdateTradesByTradeNo(items []model.UpdateOrderItem) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for _, item := range items {
+			updates := buildOrderUpdateMap(item)
+			if len(updates) == 0 {
+				continue
+			}
+			if err := tx.Model(&model.OrderTrade{}).
+				Where("trade_no = ?", item.TradeNo).
+				Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// buildOrderUpdateMap converts an UpdateOrderItem into a map containing only the non-nil fields.
+func buildOrderUpdateMap(item model.UpdateOrderItem) map[string]interface{} {
+	m := make(map[string]interface{})
+	if item.Mark != nil {
+		m["mark"] = *item.Mark
+	}
+	if item.Flag != nil {
+		m["flag"] = *item.Flag
+	}
+	if item.SellerMsg != nil {
+		m["seller_msg"] = *item.SellerMsg
+	}
+	if item.BuyerMsg != nil {
+		m["buyer_msg"] = *item.BuyerMsg
+	}
+	if item.Receiver != nil {
+		m["receiver"] = *item.Receiver
+	}
+	if item.Phone != nil {
+		m["phone"] = *item.Phone
+	}
+	if item.Province != nil {
+		m["province"] = *item.Province
+	}
+	if item.City != nil {
+		m["city"] = *item.City
+	}
+	if item.District != nil {
+		m["district"] = *item.District
+	}
+	if item.Town != nil {
+		m["town"] = *item.Town
+	}
+	if item.Address != nil {
+		m["address"] = *item.Address
+	}
+	if item.Zip != nil {
+		m["zip"] = *item.Zip
+	}
+	if item.ExpressCode != nil {
+		m["express_code"] = *item.ExpressCode
+	}
+	if item.LogisticCode != nil {
+		m["logistic_code"] = *item.LogisticCode
+	}
+	if item.LogisticName != nil {
+		m["logistic_name"] = *item.LogisticName
+	}
+	if item.ChannelName != nil {
+		m["channel_name"] = *item.ChannelName
+	}
+	return m
+}
+
 // orderTradeUpdateColumns returns the columns to update on conflict.
 func orderTradeUpdateColumns() []string {
 	return []string{

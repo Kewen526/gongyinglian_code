@@ -240,6 +240,41 @@ type UpdateAccountShopsReq struct {
 	ShopIDs []uint64 `json:"shop_ids" binding:"required"`
 }
 
+// UpdateOrderItem represents a single order's updatable fields.
+// TradeNo is required; all other fields are optional pointers — only non-nil fields are written.
+type UpdateOrderItem struct {
+	TradeNo      string   `json:"trade_no" binding:"required"`
+	Mark         *string  `json:"mark"`
+	Flag         *int     `json:"flag"`
+	SellerMsg    *string  `json:"seller_msg"`
+	BuyerMsg     *string  `json:"buyer_msg"`
+	Receiver     *string  `json:"receiver"`
+	Phone        *string  `json:"phone"`
+	Province     *string  `json:"province"`
+	City         *string  `json:"city"`
+	District     *string  `json:"district"`
+	Town         *string  `json:"town"`
+	Address      *string  `json:"address"`
+	Zip          *string  `json:"zip"`
+	ExpressCode  *string  `json:"express_code"`
+	LogisticCode *string  `json:"logistic_code"`
+	LogisticName *string  `json:"logistic_name"`
+	ChannelName  *string  `json:"channel_name"`
+}
+
+// BatchUpdateOrderReq is a list of order update items.
+type BatchUpdateOrderReq []UpdateOrderItem
+
+// MarkItem represents a single mark operation sent to WanLiNiu.
+type MarkItem struct {
+	BillCode string `json:"bill_code" binding:"required"`
+	MarkName string `json:"mark_name"`
+	Type     int    `json:"type"` // 0=覆盖 1=追加 2=清除
+}
+
+// BatchMarkReq is a list of mark operations.
+type BatchMarkReq []MarkItem
+
 // ShopListResp groups shops by platform.
 type ShopsByPlatformResp struct {
 	Platform string `json:"platform"`

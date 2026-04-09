@@ -151,3 +151,8 @@ func (s *OrderService) UpdateAccountShops(accountID uint64, shopIDs []uint64) er
 func (s *OrderService) GetStatusOptions() []model.StatusOption {
 	return model.GetAllProcessStatusOptions()
 }
+
+// BatchUpdateOrders updates specified fields for multiple orders in the local database.
+func (s *OrderService) BatchUpdateOrders(items []model.UpdateOrderItem) error {
+	return s.orderRepo.BatchUpdateTradesByTradeNo(items)
+}

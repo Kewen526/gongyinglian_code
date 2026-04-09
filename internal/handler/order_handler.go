@@ -129,6 +129,42 @@ func (h *OrderHandler) GetAccountShops(c *gin.Context) {
 	response.Success(c, gin.H{"shop_ids": shopIDs})
 }
 
+// PATCH /api/v1/orders/batch-update — batch update local order fields
+func (h *OrderHandler) BatchUpdateOrders(c *gin.Context) {
+	var req model.BatchUpdateOrderReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if len(req) == 0 {
+		response.BadRequest(c, "请求列表不能为空")
+		return
+	}
+	if err := h.orderSvc.BatchUpdateOrders(req); err != nil {
+		response.InternalError(c, "批量更新失败: "+err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
+// POST /api/v1/orders/mark — batch mark orders in WanLiNiu
+func (h *OrderHandler) BatchMarkOrders(c *gin.Context) {
+	var req model.BatchMarkReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if len(req) == 0 {
+		response.BadRequest(c, "请求列表不能为空")
+		return
+	}
+	if err := h.syncSvc.BatchMarkOrders(req); err != nil {
+		response.InternalError(c, "标记失败: "+err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
 // PUT /api/v1/accounts/:id/shops — set account's shop permissions
 func (h *OrderHandler) UpdateAccountShops(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)

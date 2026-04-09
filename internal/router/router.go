@@ -105,11 +105,13 @@ func SetupRouter(
 		orderView.GET("/orders/status-options", orderHandler.GetStatusOptions)
 	}
 
-	// --- Order: edit permission (sync) ---
+	// --- Order: edit permission (sync, batch update, mark) ---
 	orderEdit := auth.Group("")
 	orderEdit.Use(middleware.RequireModulePermission(accountRepo, "order", true))
 	{
 		orderEdit.POST("/orders/sync", orderHandler.SyncOrders)
+		orderEdit.PATCH("/orders/batch-update", orderHandler.BatchUpdateOrders)
+		orderEdit.POST("/orders/mark", orderHandler.BatchMarkOrders)
 	}
 
 	// --- Shop/Platform queries (any logged-in user with order view) ---
