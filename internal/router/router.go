@@ -13,6 +13,7 @@ func SetupRouter(
 	productHandler *handler.ProductHandler,
 	uploadHandler *handler.UploadHandler,
 	orderHandler *handler.OrderHandler,
+	billingHandler *handler.BillingHandler,
 	accountRepo *repository.AccountRepo,
 ) *gin.Engine {
 	r := gin.Default()
@@ -119,6 +120,15 @@ func SetupRouter(
 	orderView.GET("/shops/grouped", orderHandler.ListShopsGrouped)
 	orderView.GET("/shops/occupied", orderHandler.GetOccupiedShopIDs)
 	orderView.GET("/platforms", orderHandler.ListPlatforms)
+
+	// --- Billing (employees only, billing module permission) ---
+	billingGroup := auth.Group("")
+	billingGroup.Use(middleware.RequireModulePermission(accountRepo, "billing", false))
+	{
+		billingGroup.GET("/billing/wallet", billingHandler.GetWallet)
+		billingGroup.GET("/billing", billingHandler.ListBillingRecords)
+		billingGroup.POST("/billing/recharge", billingHandler.SubmitRecharge)
+	}
 
 	return r
 }

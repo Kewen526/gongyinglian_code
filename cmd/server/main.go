@@ -59,13 +59,19 @@ func main() {
 		&model.Shop{},
 		&model.AccountShop{},
 		&model.SyncState{},
+		&model.Module{},
+		&model.AccountPermission{},
+		&model.Wallet{},
+		&model.RechargeRequest{},
+		&model.BillingRecord{},
 	); err != nil {
 		log.Fatalf("Failed to auto-migrate tables: %v", err)
 	}
 	log.Println("[MySQL] Tables migrated")
 
-	// ---------- Auto-create super admin ----------
+	// ---------- Auto-create super admin & seed modules ----------
 	initSuperAdmin(db)
+	initModules(db)
 
 	// ---------- Tencent Cloud COS ----------
 	oss.InitCOS(&cfg.COS)
@@ -81,32 +87,60 @@ func main() {
 	productRepo := repository.NewProductRepo(db)
 	orderRepo := repository.NewOrderRepo(db)
 	shopRepo := repository.NewShopRepo(db)
+	billingRepo := repository.NewBillingRepo(db)
 
 	// ---------- Service Layer ----------
 	accountService := service.NewAccountService(accountRepo, shopRepo)
 	productService := service.NewProductService(productRepo)
-	orderService := service.NewOrderService(orderRepo, shopRepo, accountRepo)
-	syncService := service.NewSyncService(orderRepo, shopRepo, &cfg.WanLiNiu)
+	billingService := service.NewBillingService(billingRepo, orderRepo, productRepo)
+	orderService := service.NewOrderService(orderRepo, shopRepo, accountRepo, billingService)
+	syncService := service.NewSyncService(orderRepo, shopRepo, &cfg.WanLiNiu, billingService)
 
-	// ---------- Start auto sync ----------
+	// ---------- Start scheduled tasks ----------
 	syncService.StartAutoSync()
 	defer syncService.Stop()
 	log.Println("[Sync] Order sync service started")
+
+	billingService.StartAutoDeduct()
+	billingService.StartMonthlyDiscountRefresh()
+	defer billingService.Stop()
+	log.Println("[Billing] Billing service started")
 
 	// ---------- Handler Layer ----------
 	accountHandler := handler.NewAccountHandler(accountService)
 	productHandler := handler.NewProductHandler(productService)
 	uploadHandler := handler.NewUploadHandler()
 	orderHandler := handler.NewOrderHandler(orderService, syncService)
+	billingHandler := handler.NewBillingHandler(billingService)
 
 	// ---------- Router ----------
-	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, orderHandler, accountRepo)
+	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, orderHandler, billingHandler, accountRepo)
 
 	// ---------- Start Server ----------
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	log.Printf("[Server] Starting on %s\n", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
+	}
+}
+
+// initModules ensures required modules exist in the database.
+func initModules(db *gorm.DB) {
+	modules := []model.Module{
+		{Name: "产品管理", Code: "product"},
+		{Name: "订单管理", Code: "order"},
+		{Name: "财务流水", Code: "billing"},
+	}
+	for _, m := range modules {
+		var count int64
+		db.Model(&model.Module{}).Where("code = ?", m.Code).Count(&count)
+		if count == 0 {
+			if err := db.Create(&m).Error; err != nil {
+				log.Printf("[Init] Failed to create module %s: %v\n", m.Code, err)
+			} else {
+				log.Printf("[Init] Module created: %s\n", m.Code)
+			}
+		}
 	}
 }
 

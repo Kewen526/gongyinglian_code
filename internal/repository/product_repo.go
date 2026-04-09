@@ -20,6 +20,36 @@ func (r *ProductRepo) Create(p *model.Product) error {
 	return r.db.Create(p).Error
 }
 
+// GetControlPrice looks up the control_price for a given product_code and platform.
+// If not found with the given platform and fallbackPlatform is non-empty, retries with fallbackPlatform.
+// Returns (price, found, error).
+func (r *ProductRepo) GetControlPrice(productCode, platformName, fallbackPlatform string) (float64, bool, error) {
+	// Find product by product_code (take the first match)
+	var product model.Product
+	if err := r.db.Where("product_code = ?", productCode).First(&product).Error; err != nil {
+		return 0, false, nil // product not found
+	}
+
+	// Try main platform
+	var price model.ProductPlatformPrice
+	err := r.db.Where("product_id = ? AND platform_name = ?", product.ID, platformName).
+		First(&price).Error
+	if err == nil {
+		return price.ControlPrice, true, nil
+	}
+
+	// Retry with fallback platform
+	if fallbackPlatform != "" && fallbackPlatform != platformName {
+		err2 := r.db.Where("product_id = ? AND platform_name = ?", product.ID, fallbackPlatform).
+			First(&price).Error
+		if err2 == nil {
+			return price.ControlPrice, true, nil
+		}
+	}
+
+	return 0, false, nil
+}
+
 // CreateWithDetails creates a product and all provided sub-resources in a single transaction.
 // Sub-resource slices may be empty/nil.
 func (r *ProductRepo) CreateWithDetails(
