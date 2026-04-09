@@ -166,6 +166,19 @@ func (s *OrderService) ListPlatforms() ([]string, error) {
 	return s.shopRepo.ListPlatforms()
 }
 
+// GetOccupiedShopIDs returns shop IDs already assigned to any employee.
+// excludeAccountID > 0 means "ignore this account's own assignments" (for edit mode).
+func (s *OrderService) GetOccupiedShopIDs(excludeAccountID uint64) ([]uint64, error) {
+	ids, err := s.shopRepo.GetOccupiedShopIDs(excludeAccountID)
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		ids = []uint64{}
+	}
+	return ids, nil
+}
+
 // GetAccountShops returns the shop IDs assigned to an account.
 func (s *OrderService) GetAccountShops(accountID uint64) ([]uint64, error) {
 	return s.shopRepo.GetAccountShopIDs(accountID)

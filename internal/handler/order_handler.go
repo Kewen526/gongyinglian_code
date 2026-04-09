@@ -113,6 +113,21 @@ func (h *OrderHandler) ListPlatforms(c *gin.Context) {
 	response.Success(c, platforms)
 }
 
+// GET /api/v1/shops/occupied — shop IDs already assigned to any employee
+// Optional query param: exclude_account_id=X (pass the account being edited so its own shops are not grayed out)
+func (h *OrderHandler) GetOccupiedShopIDs(c *gin.Context) {
+	var excludeID uint64
+	if s := c.Query("exclude_account_id"); s != "" {
+		excludeID, _ = strconv.ParseUint(s, 10, 64)
+	}
+	ids, err := h.orderSvc.GetOccupiedShopIDs(excludeID)
+	if err != nil {
+		response.InternalError(c, "查询失败: "+err.Error())
+		return
+	}
+	response.Success(c, gin.H{"occupied_shop_ids": ids})
+}
+
 // GET /api/v1/accounts/:id/shops — get account's shop permissions
 func (h *OrderHandler) GetAccountShops(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)

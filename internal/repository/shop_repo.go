@@ -60,6 +60,18 @@ func (r *ShopRepo) GetAccountShopIDs(accountID uint64) ([]uint64, error) {
 	return shopIDs, err
 }
 
+// GetOccupiedShopIDs returns all shop IDs currently assigned to any employee,
+// optionally excluding one account (used when editing an existing employee's shops).
+func (r *ShopRepo) GetOccupiedShopIDs(excludeAccountID uint64) ([]uint64, error) {
+	var shopIDs []uint64
+	q := r.db.Model(&model.AccountShop{})
+	if excludeAccountID > 0 {
+		q = q.Where("account_id != ?", excludeAccountID)
+	}
+	err := q.Pluck("shop_id", &shopIDs).Error
+	return shopIDs, err
+}
+
 // IsShopAssignedToOther returns true if the shop is already assigned to any account other than excludeAccountID.
 func (r *ShopRepo) IsShopAssignedToOther(shopID, excludeAccountID uint64) (bool, error) {
 	var count int64
