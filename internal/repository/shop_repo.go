@@ -60,6 +60,27 @@ func (r *ShopRepo) GetAccountShopIDs(accountID uint64) ([]uint64, error) {
 	return shopIDs, err
 }
 
+// IsShopAssignedToOther returns true if the shop is already assigned to any account other than excludeAccountID.
+func (r *ShopRepo) IsShopAssignedToOther(shopID, excludeAccountID uint64) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.AccountShop{}).
+		Where("shop_id = ? AND account_id != ?", shopID, excludeAccountID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// GetShopIDsByAccountIDs returns all shop IDs assigned to any of the given account IDs.
+func (r *ShopRepo) GetShopIDsByAccountIDs(accountIDs []uint64) ([]uint64, error) {
+	if len(accountIDs) == 0 {
+		return []uint64{}, nil
+	}
+	var shopIDs []uint64
+	err := r.db.Model(&model.AccountShop{}).
+		Where("account_id IN ?", accountIDs).
+		Pluck("shop_id", &shopIDs).Error
+	return shopIDs, err
+}
+
 // ReplaceAccountShops replaces all shop permissions for an account.
 func (r *ShopRepo) ReplaceAccountShops(accountID uint64, shopIDs []uint64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {

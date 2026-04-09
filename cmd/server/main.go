@@ -51,17 +51,18 @@ func main() {
 		"MaxIdle=", cfg.MySQL.MaxIdleConns,
 		"MaxLifetime=", cfg.MySQL.ConnMaxLifetimeMinutes, "min")
 
-	// ---------- Auto-migrate order tables ----------
+	// ---------- Auto-migrate tables ----------
 	if err := db.AutoMigrate(
+		&model.Account{},
 		&model.OrderTrade{},
 		&model.OrderItem{},
 		&model.Shop{},
 		&model.AccountShop{},
 		&model.SyncState{},
 	); err != nil {
-		log.Fatalf("Failed to auto-migrate order tables: %v", err)
+		log.Fatalf("Failed to auto-migrate tables: %v", err)
 	}
-	log.Println("[MySQL] Order tables migrated")
+	log.Println("[MySQL] Tables migrated")
 
 	// ---------- Auto-create super admin ----------
 	initSuperAdmin(db)
@@ -84,7 +85,7 @@ func main() {
 	// ---------- Service Layer ----------
 	accountService := service.NewAccountService(accountRepo, shopRepo)
 	productService := service.NewProductService(productRepo)
-	orderService := service.NewOrderService(orderRepo, shopRepo)
+	orderService := service.NewOrderService(orderRepo, shopRepo, accountRepo)
 	syncService := service.NewSyncService(orderRepo, shopRepo, &cfg.WanLiNiu)
 
 	// ---------- Start auto sync ----------

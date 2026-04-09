@@ -44,6 +44,11 @@ func (s *AccountService) CreateAccount(req *model.CreateAccountReq) (*model.Acco
 		return nil, err
 	}
 
+	// Validate parent based on role
+	if err := s.validateParent(req.Role, req.ParentID); err != nil {
+		return nil, err
+	}
+
 	// Hash password
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -55,6 +60,7 @@ func (s *AccountService) CreateAccount(req *model.CreateAccountReq) (*model.Acco
 		Password: string(hashed),
 		RealName: req.RealName,
 		Role:     req.Role,
+		ParentID: req.ParentID,
 	}
 
 	// Build permissions
@@ -71,6 +77,36 @@ func (s *AccountService) CreateAccount(req *model.CreateAccountReq) (*model.Acco
 		return nil, err
 	}
 	return account, nil
+}
+
+// validateParent checks that the parent_id matches the required role hierarchy.
+// Supervisor (2) must have a TeamLead parent; Employee (3) must have a Supervisor parent.
+func (s *AccountService) validateParent(role uint8, parentID *uint64) error {
+	switch role {
+	case model.RoleSupervisor:
+		if parentID == nil {
+			return errors.New("新增主管时必须选择所属团队负责人")
+		}
+		parent, err := s.repo.GetByID(*parentID)
+		if err != nil {
+			return errors.New("所选团队负责人不存在")
+		}
+		if parent.Role != model.RoleTeamLead {
+			return errors.New("主管的上级必须是团队负责人")
+		}
+	case model.RoleEmployee:
+		if parentID == nil {
+			return errors.New("新增员工时必须选择所属主管")
+		}
+		parent, err := s.repo.GetByID(*parentID)
+		if err != nil {
+			return errors.New("所选主管不存在")
+		}
+		if parent.Role != model.RoleSupervisor {
+			return errors.New("员工的上级必须是主管")
+		}
+	}
+	return nil
 }
 
 func (s *AccountService) GetAllModules() ([]model.Module, error) {
@@ -151,11 +187,21 @@ func (s *AccountService) GetAccountDetail(id uint64) (*model.AccountDetailResp, 
 		shopIDs = []uint64{}
 	}
 
+	// Resolve parent name
+	var parentName string
+	if account.ParentID != nil {
+		if parent, err := s.repo.GetByID(*account.ParentID); err == nil {
+			parentName = parent.RealName
+		}
+	}
+
 	return &model.AccountDetailResp{
 		ID:          account.ID,
 		Username:    account.Username,
 		RealName:    account.RealName,
 		Role:        account.Role,
+		ParentID:    account.ParentID,
+		ParentName:  parentName,
 		Permissions: permDetails,
 		ShopIDs:     shopIDs,
 		CreatedAt:   account.CreatedAt,
@@ -201,6 +247,17 @@ func (s *AccountService) UpdateAccount(id uint64, req *model.UpdateAccountReq) e
 
 	if req.Role != nil {
 		updates["role"] = *req.Role
+	}
+
+	if req.ParentID != nil {
+		targetRole := existing.Role
+		if req.Role != nil {
+			targetRole = *req.Role
+		}
+		if err := s.validateParent(targetRole, req.ParentID); err != nil {
+			return err
+		}
+		updates["parent_id"] = *req.ParentID
 	}
 
 	if len(updates) == 0 {

@@ -16,6 +16,7 @@ type Account struct {
 	Password  string    `json:"-" gorm:"type:varchar(255);not null"`
 	RealName  string    `json:"real_name" gorm:"type:varchar(64);not null;default:''"`
 	Role      uint8     `json:"role" gorm:"type:tinyint unsigned;not null"`
+	ParentID  *uint64   `json:"parent_id" gorm:"type:bigint unsigned;index;default:null;comment:直属上级账号ID"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -47,11 +48,12 @@ func (AccountPermission) TableName() string { return "account_permission" }
 // ---------- Request / Response DTOs ----------
 
 type CreateAccountReq struct {
-	Username    string             `json:"username" binding:"required"`
-	Password    string             `json:"password" binding:"required,min=6"`
-	RealName    string             `json:"real_name"`
-	Role        uint8              `json:"role" binding:"oneof=0 1 2 3"`
-	Permissions []PermissionItem   `json:"permissions"`
+	Username    string           `json:"username" binding:"required"`
+	Password    string           `json:"password" binding:"required,min=6"`
+	RealName    string           `json:"real_name"`
+	Role        uint8            `json:"role" binding:"oneof=0 1 2 3"`
+	ParentID    *uint64          `json:"parent_id"`
+	Permissions []PermissionItem `json:"permissions"`
 }
 
 type PermissionItem struct {
@@ -61,10 +63,11 @@ type PermissionItem struct {
 }
 
 type UpdateAccountReq struct {
-	Username *string `json:"username"`
-	Password *string `json:"password"`
-	RealName *string `json:"real_name"`
-	Role     *uint8  `json:"role" binding:"omitempty,oneof=0 1 2 3"`
+	Username *string  `json:"username"`
+	Password *string  `json:"password"`
+	RealName *string  `json:"real_name"`
+	Role     *uint8   `json:"role" binding:"omitempty,oneof=0 1 2 3"`
+	ParentID *uint64  `json:"parent_id"`
 }
 
 type UpdatePermissionsReq struct {
@@ -72,13 +75,15 @@ type UpdatePermissionsReq struct {
 }
 
 type AccountDetailResp struct {
-	ID          uint64               `json:"id"`
-	Username    string               `json:"username"`
-	RealName    string               `json:"real_name"`
-	Role        uint8                `json:"role"`
-	Permissions []PermissionDetail   `json:"permissions"`
-	ShopIDs     []uint64             `json:"shop_ids"`
-	CreatedAt   time.Time            `json:"created_at"`
+	ID          uint64             `json:"id"`
+	Username    string             `json:"username"`
+	RealName    string             `json:"real_name"`
+	Role        uint8              `json:"role"`
+	ParentID    *uint64            `json:"parent_id"`
+	ParentName  string             `json:"parent_name"`
+	Permissions []PermissionDetail `json:"permissions"`
+	ShopIDs     []uint64           `json:"shop_ids"`
+	CreatedAt   time.Time          `json:"created_at"`
 }
 
 type PermissionDetail struct {
