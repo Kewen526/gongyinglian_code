@@ -144,6 +144,16 @@ func (r *OrderRepo) GetTradeByUID(uid string) (*model.OrderTrade, error) {
 	return &trade, nil
 }
 
+// GetTradeByTradeNo returns a single trade by trade_no.
+func (r *OrderRepo) GetTradeByTradeNo(tradeNo string) (*model.OrderTrade, error) {
+	var trade model.OrderTrade
+	err := r.db.Where("trade_no = ?", tradeNo).First(&trade).Error
+	if err != nil {
+		return nil, err
+	}
+	return &trade, nil
+}
+
 // GetTradeByID returns a single trade by primary key ID.
 func (r *OrderRepo) GetTradeByID(id uint64) (*model.OrderTrade, error) {
 	var trade model.OrderTrade
@@ -190,6 +200,27 @@ func (r *OrderRepo) GetSyncState(key string) (*model.SyncState, error) {
 		return nil, err
 	}
 	return &state, nil
+}
+
+// SetMarkApprovedAtIfNull sets mark_approved_at for an order only if it is currently NULL.
+func (r *OrderRepo) SetMarkApprovedAtIfNull(uid string, t time.Time) error {
+	return r.db.Model(&model.OrderTrade{}).
+		Where("uid = ? AND mark_approved_at IS NULL", uid).
+		Update("mark_approved_at", t).Error
+}
+
+// UpdateBillingStatus updates billing_status for an order.
+func (r *OrderRepo) UpdateBillingStatus(uid string, status int8) error {
+	return r.db.Model(&model.OrderTrade{}).
+		Where("uid = ?", uid).
+		Update("billing_status", status).Error
+}
+
+// ListPendingBillingOrders returns orders where mark="已审核" and billing_status=0.
+func (r *OrderRepo) ListPendingBillingOrders() ([]model.OrderTrade, error) {
+	var trades []model.OrderTrade
+	err := r.db.Where("mark = ? AND billing_status = ?", "已审核", model.BillingStatusPending).Find(&trades).Error
+	return trades, err
 }
 
 // UpsertSyncState updates or creates a sync state.

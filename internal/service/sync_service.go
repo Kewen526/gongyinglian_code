@@ -26,18 +26,20 @@ const (
 )
 
 type SyncService struct {
-	orderRepo *repository.OrderRepo
-	shopRepo  *repository.ShopRepo
-	cfg       *config.WanLiNiuConfig
-	stopCh    chan struct{}
+	orderRepo      *repository.OrderRepo
+	shopRepo       *repository.ShopRepo
+	cfg            *config.WanLiNiuConfig
+	billingService *BillingService
+	stopCh         chan struct{}
 }
 
-func NewSyncService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopRepo, cfg *config.WanLiNiuConfig) *SyncService {
+func NewSyncService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopRepo, cfg *config.WanLiNiuConfig, billingService *BillingService) *SyncService {
 	return &SyncService{
-		orderRepo: orderRepo,
-		shopRepo:  shopRepo,
-		cfg:       cfg,
-		stopCh:    make(chan struct{}),
+		orderRepo:      orderRepo,
+		shopRepo:       shopRepo,
+		cfg:            cfg,
+		billingService: billingService,
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -283,6 +285,12 @@ func (s *SyncService) saveOrders(rawOrders []map[string]interface{}) (int, error
 			continue
 		}
 		saved++
+
+		// Trigger billing deduction when order is marked "已审核"
+		if trade.Mark == "已审核" && s.billingService != nil {
+			_ = s.orderRepo.SetMarkApprovedAtIfNull(trade.UID, time.Now())
+			s.billingService.TriggerDeductionAsync(&trade)
+		}
 	}
 	return saved, nil
 }

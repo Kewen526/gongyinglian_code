@@ -124,6 +124,8 @@ type OrderTrade struct {
 	OlnOrderListJSON      string     `json:"-" gorm:"type:text;comment:明细线上单号JSON"`
 	MergeUidsJSON         string     `json:"-" gorm:"type:text;comment:合并前订单号JSON"`
 	PlatformDiscountJSON  string     `json:"-" gorm:"type:text;comment:平台优惠信息JSON"`
+	MarkApprovedAt        *time.Time `json:"mark_approved_at" gorm:"type:datetime;index;comment:mark变为已审核的时间"`
+	BillingStatus         int8       `json:"billing_status" gorm:"type:tinyint;default:0;index;comment:0未扣款1成功2余额不足3错误"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 

@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"supply-chain/internal/model"
 	"supply-chain/internal/repository"
+	"time"
 )
 
 type OrderService struct {
-	orderRepo   *repository.OrderRepo
-	shopRepo    *repository.ShopRepo
-	accountRepo *repository.AccountRepo
+	orderRepo      *repository.OrderRepo
+	shopRepo       *repository.ShopRepo
+	accountRepo    *repository.AccountRepo
+	billingService *BillingService
 }
 
-func NewOrderService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopRepo, accountRepo *repository.AccountRepo) *OrderService {
-	return &OrderService{orderRepo: orderRepo, shopRepo: shopRepo, accountRepo: accountRepo}
+func NewOrderService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopRepo, accountRepo *repository.AccountRepo, billingService *BillingService) *OrderService {
+	return &OrderService{orderRepo: orderRepo, shopRepo: shopRepo, accountRepo: accountRepo, billingService: billingService}
 }
 
 // getEffectiveShopIDs returns the shop IDs visible to the given account based on hierarchy.
@@ -213,6 +215,24 @@ func (s *OrderService) GetStatusOptions() []model.StatusOption {
 }
 
 // BatchUpdateOrders updates specified fields for multiple orders in the local database.
+// If any item sets mark to "已审核", deduction is triggered asynchronously.
 func (s *OrderService) BatchUpdateOrders(items []model.UpdateOrderItem) error {
-	return s.orderRepo.BatchUpdateTradesByTradeNo(items)
+	if err := s.orderRepo.BatchUpdateTradesByTradeNo(items); err != nil {
+		return err
+	}
+	if s.billingService == nil {
+		return nil
+	}
+	for _, item := range items {
+		if item.Mark == nil || *item.Mark != "已审核" {
+			continue
+		}
+		trade, err := s.orderRepo.GetTradeByTradeNo(item.TradeNo)
+		if err != nil || trade == nil {
+			continue
+		}
+		_ = s.orderRepo.SetMarkApprovedAtIfNull(trade.UID, time.Now())
+		s.billingService.TriggerDeductionAsync(trade)
+	}
+	return nil
 }
