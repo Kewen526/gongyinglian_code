@@ -122,7 +122,77 @@ type WalletResp struct {
 }
 
 type BillingListResp struct {
-	Total   int64           `json:"total"`
-	List    []BillingRecord `json:"list"`
-	Wallet  WalletResp      `json:"wallet"`
+	Total  int64           `json:"total"`
+	List   []BillingRecord `json:"list"`
+	Wallet WalletResp      `json:"wallet"`
+}
+
+// ---------- Admin DTOs ----------
+
+type FinanceOverviewResp struct {
+	TotalBalance       float64 `json:"total_balance"`
+	TodayRechargeTotal float64 `json:"today_recharge_total"`
+}
+
+type RechargeRecordResp struct {
+	ID            uint64    `json:"id"`
+	AccountID     uint64    `json:"account_id"`
+	Username      string    `json:"username"`
+	RealName      string    `json:"real_name"`
+	Amount        float64   `json:"amount"`
+	PaymentMethod string    `json:"payment_method"`
+	TransactionNo string    `json:"transaction_no"`
+	VoucherURL    string    `json:"voucher_url"`
+	Status        string    `json:"status"`
+	Remark        string    `json:"remark"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type AdminRechargeListReq struct {
+	Status    string `form:"status"`     // pending/approved/rejected（空=全部）
+	StartDate string `form:"start_date"` // YYYY-MM-DD
+	EndDate   string `form:"end_date"`
+	Page      int    `form:"page"`
+	PageSize  int    `form:"page_size"`
+}
+
+type AdminRechargeListResp struct {
+	Total int64                `json:"total"`
+	List  []RechargeRecordResp `json:"list"`
+}
+
+type RejectRechargeReq struct {
+	Remark string `json:"remark"`
+}
+
+type AdminBillingListReq struct {
+	StartDate string `form:"start_date"`
+	EndDate   string `form:"end_date"`
+	Type      string `form:"type"`       // recharge/deduct/refund（空=全部）
+	AccountID uint64 `form:"account_id"` // 按账号筛选（可选）
+	Page      int    `form:"page"`
+	PageSize  int    `form:"page_size"`
+}
+
+type BillingRecordWithUser struct {
+	BillingRecord
+	Username string `json:"username"`
+	RealName string `json:"real_name"`
+}
+
+type AdminBillingListResp struct {
+	Total int64                   `json:"total"`
+	List  []BillingRecordWithUser `json:"list"`
+}
+
+// ---------- Employee recharge records DTOs ----------
+
+type MyRechargeListReq struct {
+	Page     int `form:"page"`
+	PageSize int `form:"page_size"`
+}
+
+type MyRechargeListResp struct {
+	Total int64              `json:"total"`
+	List  []RechargeRequest  `json:"list"`
 }

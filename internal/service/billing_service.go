@@ -341,6 +341,122 @@ func (s *BillingService) SubmitRecharge(accountID uint64, req *model.SubmitRecha
 	})
 }
 
+// ---------- Admin API methods ----------
+
+// GetFinanceOverview returns total wallet balance and today's approved recharge total.
+func (s *BillingService) GetFinanceOverview() (*model.FinanceOverviewResp, error) {
+	total, err := s.billingRepo.GetTotalBalance()
+	if err != nil {
+		return nil, err
+	}
+	todayRecharge, err := s.billingRepo.GetTodayApprovedRechargeTotal()
+	if err != nil {
+		return nil, err
+	}
+	return &model.FinanceOverviewResp{
+		TotalBalance:       total,
+		TodayRechargeTotal: todayRecharge,
+	}, nil
+}
+
+// ListRechargeRequestsAdmin returns paginated recharge requests with account info.
+func (s *BillingService) ListRechargeRequestsAdmin(req *model.AdminRechargeListReq) (*model.AdminRechargeListResp, error) {
+	records, total, err := s.billingRepo.ListRechargeRequests(req)
+	if err != nil {
+		return nil, err
+	}
+	// Batch fetch account info
+	accountIDs := make([]uint64, 0, len(records))
+	for _, r := range records {
+		accountIDs = append(accountIDs, r.AccountID)
+	}
+	accountMap, _ := s.billingRepo.GetAccountInfoByIDs(accountIDs)
+
+	list := make([]model.RechargeRecordResp, 0, len(records))
+	for _, r := range records {
+		info := accountMap[r.AccountID]
+		list = append(list, model.RechargeRecordResp{
+			ID:            r.ID,
+			AccountID:     r.AccountID,
+			Username:      info.Username,
+			RealName:      info.RealName,
+			Amount:        r.Amount,
+			PaymentMethod: r.PaymentMethod,
+			TransactionNo: r.TransactionNo,
+			VoucherURL:    r.VoucherURL,
+			Status:        r.Status,
+			Remark:        r.Remark,
+			CreatedAt:     r.CreatedAt,
+		})
+	}
+	return &model.AdminRechargeListResp{Total: total, List: list}, nil
+}
+
+// ApproveRecharge approves a recharge request and credits the wallet.
+func (s *BillingService) ApproveRecharge(rechargeID uint64) error {
+	req, err := s.billingRepo.GetRechargeRequestByID(rechargeID)
+	if err != nil {
+		return fmt.Errorf("充值申请不存在")
+	}
+	flowNo := fmt.Sprintf("RECHARGE-%d", rechargeID)
+	return s.billingRepo.ApproveRecharge(rechargeID, req.AccountID, req.Amount, flowNo)
+}
+
+// RejectRecharge rejects a pending recharge request.
+func (s *BillingService) RejectRecharge(rechargeID uint64, remark string) error {
+	return s.billingRepo.RejectRecharge(rechargeID, remark)
+}
+
+// ListAllBillingRecords returns all billing records with account info (admin view).
+func (s *BillingService) ListAllBillingRecords(req *model.AdminBillingListReq) (*model.AdminBillingListResp, error) {
+	records, total, err := s.billingRepo.ListAllBillingRecords(req)
+	if err != nil {
+		return nil, err
+	}
+	accountIDs := make([]uint64, 0, len(records))
+	for _, r := range records {
+		accountIDs = append(accountIDs, r.AccountID)
+	}
+	accountMap, _ := s.billingRepo.GetAccountInfoByIDs(accountIDs)
+
+	list := make([]model.BillingRecordWithUser, 0, len(records))
+	for _, r := range records {
+		info := accountMap[r.AccountID]
+		list = append(list, model.BillingRecordWithUser{
+			BillingRecord: r,
+			Username:      info.Username,
+			RealName:      info.RealName,
+		})
+	}
+	return &model.AdminBillingListResp{Total: total, List: list}, nil
+}
+
+// ExportBillingRecords generates an Excel file for all matching billing records.
+func (s *BillingService) ExportBillingRecords(req *model.AdminBillingListReq) ([]byte, error) {
+	records, err := s.billingRepo.GetAllBillingRecordsForExport(req)
+	if err != nil {
+		return nil, err
+	}
+	accountIDs := make([]uint64, 0, len(records))
+	for _, r := range records {
+		accountIDs = append(accountIDs, r.AccountID)
+	}
+	accountMap, _ := s.billingRepo.GetAccountInfoByIDs(accountIDs)
+
+	return buildBillingExcel(records, accountMap)
+}
+
+// ---------- Employee: own recharge records ----------
+
+// ListMyRechargeRecords returns the recharge history for the logged-in user.
+func (s *BillingService) ListMyRechargeRecords(accountID uint64, req *model.MyRechargeListReq) (*model.MyRechargeListResp, error) {
+	records, total, err := s.billingRepo.ListRechargeRequestsByAccountID(accountID, req.Page, req.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	return &model.MyRechargeListResp{Total: total, List: records}, nil
+}
+
 // ListBillingRecords returns filtered billing records plus wallet summary.
 func (s *BillingService) ListBillingRecords(accountID uint64, req *model.BillingListReq) (*model.BillingListResp, error) {
 	records, total, err := s.billingRepo.ListBillingRecords(req, accountID)

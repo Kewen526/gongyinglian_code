@@ -112,9 +112,10 @@ func main() {
 	uploadHandler := handler.NewUploadHandler()
 	orderHandler := handler.NewOrderHandler(orderService, syncService)
 	billingHandler := handler.NewBillingHandler(billingService)
+	adminBillingHandler := handler.NewAdminBillingHandler(billingService)
 
 	// ---------- Router ----------
-	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, orderHandler, billingHandler, accountRepo)
+	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, orderHandler, billingHandler, adminBillingHandler, accountRepo)
 
 	// ---------- Start Server ----------
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

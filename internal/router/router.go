@@ -14,6 +14,7 @@ func SetupRouter(
 	uploadHandler *handler.UploadHandler,
 	orderHandler *handler.OrderHandler,
 	billingHandler *handler.BillingHandler,
+	adminBillingHandler *handler.AdminBillingHandler,
 	accountRepo *repository.AccountRepo,
 ) *gin.Engine {
 	r := gin.Default()
@@ -128,6 +129,19 @@ func SetupRouter(
 		billingGroup.GET("/billing/wallet", billingHandler.GetWallet)
 		billingGroup.GET("/billing", billingHandler.ListBillingRecords)
 		billingGroup.POST("/billing/recharge", billingHandler.SubmitRecharge)
+		billingGroup.GET("/billing/recharge-records", billingHandler.ListMyRechargeRecords)
+	}
+
+	// --- Admin Finance Center (super admin only) ---
+	adminFinance := auth.Group("/admin/finance")
+	adminFinance.Use(middleware.RequireSuperAdmin())
+	{
+		adminFinance.GET("/overview", adminBillingHandler.GetFinanceOverview)
+		adminFinance.GET("/recharge-requests", adminBillingHandler.ListRechargeRequests)
+		adminFinance.POST("/recharge-requests/:id/approve", adminBillingHandler.ApproveRecharge)
+		adminFinance.POST("/recharge-requests/:id/reject", adminBillingHandler.RejectRecharge)
+		adminFinance.GET("/billing-records", adminBillingHandler.ListAllBillingRecords)
+		adminFinance.GET("/billing-records/export", adminBillingHandler.ExportBillingRecords)
 	}
 
 	return r
