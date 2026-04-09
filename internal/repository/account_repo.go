@@ -113,6 +113,20 @@ func (r *AccountRepo) DeleteAccount(id uint64) error {
 	})
 }
 
+// GetDirectSubordinateIDs returns account IDs whose parent_id equals the given accountID.
+func (r *AccountRepo) GetDirectSubordinateIDs(parentID uint64) ([]uint64, error) {
+	var ids []uint64
+	err := r.db.Model(&model.Account{}).Where("parent_id = ?", parentID).Pluck("id", &ids).Error
+	return ids, err
+}
+
+// GetByIDs returns accounts by a list of IDs.
+func (r *AccountRepo) GetByIDs(ids []uint64) ([]model.Account, error) {
+	var accounts []model.Account
+	err := r.db.Where("id IN ?", ids).Find(&accounts).Error
+	return accounts, err
+}
+
 func (r *AccountRepo) CreateAccountWithPermissions(account *model.Account, permissions []model.AccountPermission) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(account).Error; err != nil {
