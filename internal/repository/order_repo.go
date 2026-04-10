@@ -209,6 +209,15 @@ func (r *OrderRepo) SetMarkApprovedAtIfNull(uid string, t time.Time) error {
 		Update("mark_approved_at", t).Error
 }
 
+// MarkAfterSaleComplete sets process_status=99 for the given trade_no if not already 99.
+// Returns true if the record was actually updated (existed and was changed).
+func (r *OrderRepo) MarkAfterSaleComplete(tradeNo string) (bool, error) {
+	result := r.db.Model(&model.OrderTrade{}).
+		Where("trade_no = ? AND process_status != ?", tradeNo, 99).
+		Update("process_status", 99)
+	return result.RowsAffected > 0, result.Error
+}
+
 // UpdateBillingStatus updates billing_status for an order.
 func (r *OrderRepo) UpdateBillingStatus(uid string, status int8) error {
 	return r.db.Model(&model.OrderTrade{}).
