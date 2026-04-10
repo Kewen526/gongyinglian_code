@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"supply-chain/internal/model"
 	"time"
@@ -114,6 +115,53 @@ func (r *BillingRepo) DeleteRetryableRecord(flowNo string) (bool, error) {
 
 func (r *BillingRepo) CreateBillingRecord(tx *gorm.DB, rec *model.BillingRecord) error {
 	return tx.Create(rec).Error
+}
+
+// GetDeductionRecord fetches the successful deduction record by flow_no.
+func (r *BillingRepo) GetDeductionRecord(flowNo string) (*model.BillingRecord, error) {
+	var rec model.BillingRecord
+	err := r.db.Where("flow_no = ? AND status = ?", flowNo, "success").First(&rec).Error
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// ProcessRefund credits the wallet and creates a refund billing record in a single transaction.
+// Also updates order billing_status to BillingStatusRefunded(4).
+func (r *BillingRepo) ProcessRefund(accountID uint64, tradeUID, tradeNo, platform, shopName, flowNo string, amount float64, markApprovedAt *time.Time) error {
+	wallet, err := r.GetWalletByAccountID(accountID)
+	if err != nil {
+		return fmt.Errorf("get wallet: %w", err)
+	}
+	newBalance := math.Round((wallet.Balance+amount)*100) / 100
+
+	rec := &model.BillingRecord{
+		FlowNo:         flowNo,
+		AccountID:      accountID,
+		TradeNo:        tradeNo,
+		TradeUID:       tradeUID,
+		Platform:       platform,
+		ShopName:       shopName,
+		Type:           "refund",
+		ActualAmount:   amount,
+		Status:         "success",
+		BalanceBefore:  wallet.Balance,
+		BalanceAfter:   newBalance,
+		MarkApprovedAt: markApprovedAt,
+	}
+
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := r.CreateBillingRecord(tx, rec); err != nil {
+			return err
+		}
+		if err := r.UpdateWalletBalance(tx, accountID, newBalance); err != nil {
+			return err
+		}
+		return tx.Model(&model.OrderTrade{}).
+			Where("uid = ? AND billing_status = ?", tradeUID, model.BillingStatusSuccess).
+			Update("billing_status", model.BillingStatusRefunded).Error
+	})
 }
 
 func (r *BillingRepo) DB() *gorm.DB { return r.db }

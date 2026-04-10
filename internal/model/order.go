@@ -73,7 +73,7 @@ type OrderTrade struct {
 	ApproveTimeMs         int64      `json:"approve_time_ms" gorm:"type:bigint;comment:审核时间戳ms"`
 	EstimateSendTimeMs    int64      `json:"estimate_send_time_ms" gorm:"type:bigint;comment:预计发货时间戳ms"`
 	Status                int        `json:"status" gorm:"type:int;index;comment:状态 1处理中 2发货 3完成 4关闭 5其他"`
-	ProcessStatus         int        `json:"process_status" gorm:"type:int;index;comment:万里牛处理状态"`
+	ProcessStatus         int        `json:"process_status" gorm:"type:int;index;index:idx_refund_scan,priority:1;comment:万里牛处理状态"`
 	IsPay                 bool       `json:"is_pay" gorm:"comment:是否已付款"`
 	TpTid                 string     `json:"tp_tid" gorm:"type:varchar(255);comment:线上单号"`
 	ExpressCode           string     `json:"express_code" gorm:"type:varchar(128);index;comment:快递单号"`
@@ -125,7 +125,7 @@ type OrderTrade struct {
 	MergeUidsJSON         string     `json:"-" gorm:"type:text;comment:合并前订单号JSON"`
 	PlatformDiscountJSON  string     `json:"-" gorm:"type:text;comment:平台优惠信息JSON"`
 	MarkApprovedAt        *time.Time `json:"mark_approved_at" gorm:"type:datetime;index;comment:mark变为已审核的时间"`
-	BillingStatus         int8       `json:"billing_status" gorm:"type:tinyint;default:0;index;comment:0未扣款1成功2余额不足3错误"`
+	BillingStatus         int8       `json:"billing_status" gorm:"type:tinyint;default:0;index;index:idx_refund_scan,priority:2;comment:0未扣款1成功2余额不足3错误4已退款"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 
