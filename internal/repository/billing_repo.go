@@ -279,8 +279,9 @@ func (r *BillingRepo) GetAccountInfoByIDs(ids []uint64) (map[uint64]AccountBasic
 }
 
 // ListAllBillingRecords returns paginated billing records for all accounts (admin view).
+// Only successful records are returned (excludes error/insufficient deductions).
 func (r *BillingRepo) ListAllBillingRecords(req *model.AdminBillingListReq) ([]model.BillingRecord, int64, error) {
-	q := r.db.Model(&model.BillingRecord{})
+	q := r.db.Model(&model.BillingRecord{}).Where("status = ?", "success")
 	if req.StartDate != "" {
 		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
 	}
@@ -310,8 +311,9 @@ func (r *BillingRepo) ListAllBillingRecords(req *model.AdminBillingListReq) ([]m
 }
 
 // GetAllBillingRecordsForExport returns all records matching filters (no pagination, for Excel export).
+// Only successful records are exported (excludes error/insufficient deductions).
 func (r *BillingRepo) GetAllBillingRecordsForExport(req *model.AdminBillingListReq) ([]model.BillingRecord, error) {
-	q := r.db.Model(&model.BillingRecord{})
+	q := r.db.Model(&model.BillingRecord{}).Where("status = ?", "success")
 	if req.StartDate != "" {
 		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
 	}
