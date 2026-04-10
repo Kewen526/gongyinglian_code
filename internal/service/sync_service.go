@@ -18,11 +18,13 @@ import (
 )
 
 const (
-	syncKey        = "order_sync"
-	tradeListPath  = "/erp/opentrade/list/trades"
-	batchMarkPath  = "/erp/opentrade/modify/batch/mark"
-	maxPageSize    = 200
-	initialSyncDays = 7 // first sync pulls last 7 days
+	syncKey          = "order_sync"
+	tradeListPath    = "/erp/opentrade/list/trades"
+	batchMarkPath    = "/erp/opentrade/modify/batch/mark"
+	returnOrderPath  = "/erp/open/return/order/list"
+	maxPageSize      = 200
+	initialSyncDays  = 7  // first sync pulls last 7 days
+	afterSaleSyncDays = 15 // after-sale sync pulls last 15 days
 )
 
 type SyncService struct {
@@ -544,6 +546,134 @@ func getBool(m map[string]interface{}, key string) bool {
 	default:
 		return false
 	}
+}
+
+// StartAfterSaleSync starts a background goroutine that marks after-sale orders every 5 minutes.
+func (s *SyncService) StartAfterSaleSync() {
+	go func() {
+		log.Println("[AfterSale] After-sale sync started (interval=5m)")
+		s.afterSaleOnce()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.afterSaleOnce()
+			case <-s.stopCh:
+				log.Println("[AfterSale] After-sale sync stopped")
+				return
+			}
+		}
+	}()
+}
+
+func (s *SyncService) afterSaleOnce() {
+	now := time.Now()
+	start := now.AddDate(0, 0, -afterSaleSyncDays).Format("2006-01-02 00:00:00")
+	end := now.Format("2006-01-02 15:04:05")
+
+	count, err := s.syncAfterSaleOrders(start, end)
+	if err != nil {
+		log.Printf("[AfterSale] Error: %v\n", err)
+	} else if count > 0 {
+		log.Printf("[AfterSale] Marked %d orders as after-sale complete\n", count)
+	}
+}
+
+func (s *SyncService) syncAfterSaleOrders(startTime, endTime string) (int, error) {
+	var allOrders []map[string]interface{}
+	page := 1
+
+	for {
+		result, err := s.fetchReturnOrderPage(page, maxPageSize, startTime, endTime)
+		if err != nil {
+			return 0, err
+		}
+
+		code, _ := result["code"].(float64)
+		if int(code) != 0 {
+			return 0, fmt.Errorf("API error: %v", result)
+		}
+
+		dataRaw, ok := result["data"]
+		if !ok || dataRaw == nil {
+			break
+		}
+		orders, ok := dataRaw.([]interface{})
+		if !ok || len(orders) == 0 {
+			break
+		}
+		for _, o := range orders {
+			if m, ok := o.(map[string]interface{}); ok {
+				allOrders = append(allOrders, m)
+			}
+		}
+		if len(orders) < maxPageSize {
+			break
+		}
+		page++
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	count := 0
+	for _, order := range allOrders {
+		// Filter: type=0 (退货) AND describe="退货退款"
+		if getInt(order, "type") != 0 || getString(order, "describe") != "退货退款" {
+			continue
+		}
+		tradeNo := getString(order, "oln_trade_code")
+		if tradeNo == "" {
+			continue
+		}
+		updated, err := s.orderRepo.MarkAfterSaleComplete(tradeNo)
+		if err != nil {
+			log.Printf("[AfterSale] Failed to mark trade_no=%s: %v\n", tradeNo, err)
+			continue
+		}
+		if updated {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *SyncService) fetchReturnOrderPage(page, limit int, startTime, endTime string) (map[string]interface{}, error) {
+	allParams := map[string]string{
+		"page":       strconv.Itoa(page),
+		"limit":      strconv.Itoa(limit),
+		"time_type":  "1",
+		"start_time": startTime,
+		"end_time":   endTime,
+		"_app":       s.cfg.AppKey,
+		"_t":         strconv.FormatInt(time.Now().Unix(), 10),
+	}
+	allParams["_sign"] = buildSign(allParams, s.cfg.Secret)
+
+	form := url.Values{}
+	for k, v := range allParams {
+		form.Set(k, v)
+	}
+
+	resp, err := http.Post(
+		s.cfg.BaseURL+returnOrderPath,
+		"application/x-www-form-urlencoded",
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("http post: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("json unmarshal: %w", err)
+	}
+	return result, nil
 }
 
 // BatchMarkOrders sends a batch mark request to WanLiNiu.

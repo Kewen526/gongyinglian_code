@@ -98,8 +98,10 @@ func main() {
 
 	// ---------- Start scheduled tasks ----------
 	syncService.StartAutoSync()
+	syncService.StartAfterSaleSync()
 	defer syncService.Stop()
 	log.Println("[Sync] Order sync service started")
+	log.Println("[Sync] After-sale sync service started")
 
 	billingService.StartAutoDeduct()
 	billingService.StartMonthlyDiscountRefresh()
