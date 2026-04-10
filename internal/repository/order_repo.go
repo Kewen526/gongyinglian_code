@@ -225,6 +225,18 @@ func (r *OrderRepo) UpdateBillingStatus(uid string, status int8) error {
 		Update("billing_status", status).Error
 }
 
+// ListPendingRefundOrders returns orders that have been after-sale completed and need a refund.
+// Conditions: process_status=99, mark=已审核, mark_approved_at IS NOT NULL, billing_status=1 (success).
+// Uses composite index idx_refund_scan(process_status, billing_status) for performance.
+func (r *OrderRepo) ListPendingRefundOrders() ([]model.OrderTrade, error) {
+	var trades []model.OrderTrade
+	err := r.db.Where(
+		"process_status = ? AND billing_status = ? AND mark = ? AND mark_approved_at IS NOT NULL",
+		99, model.BillingStatusSuccess, "已审核",
+	).Find(&trades).Error
+	return trades, err
+}
+
 // ListPendingBillingOrders returns orders where mark="已审核" and billing_status is pending/error/insufficient.
 func (r *OrderRepo) ListPendingBillingOrders() ([]model.OrderTrade, error) {
 	var trades []model.OrderTrade

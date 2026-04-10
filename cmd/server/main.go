@@ -104,6 +104,7 @@ func main() {
 	log.Println("[Sync] After-sale sync service started")
 
 	billingService.StartAutoDeduct()
+	billingService.StartAutoRefund()
 	billingService.StartMonthlyDiscountRefresh()
 	defer billingService.Stop()
 	log.Println("[Billing] Billing service started")

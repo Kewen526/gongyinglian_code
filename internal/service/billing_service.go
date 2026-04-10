@@ -70,6 +70,74 @@ func (s *BillingService) autoDeductOnce() {
 	}
 }
 
+// StartAutoRefund scans every 5 minutes for orders needing a refund (process_status=99 + billing_status=1).
+func (s *BillingService) StartAutoRefund() {
+	go func() {
+		log.Println("[Billing] Auto-refund task started (interval=5m)")
+		s.autoRefundOnce()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.autoRefundOnce()
+			case <-s.stopCh:
+				log.Println("[Billing] Auto-refund task stopped")
+				return
+			}
+		}
+	}()
+}
+
+func (s *BillingService) autoRefundOnce() {
+	trades, err := s.orderRepo.ListPendingRefundOrders()
+	if err != nil {
+		log.Printf("[Billing] ListPendingRefundOrders error: %v\n", err)
+		return
+	}
+	for _, trade := range trades {
+		if err := s.processRefund(&trade); err != nil {
+			log.Printf("[Billing] ProcessRefund trade=%s error: %v\n", trade.TradeNo, err)
+		}
+	}
+}
+
+// processRefund handles the full refund for one order.
+// Idempotent: skips if refund flow_no already exists or billing_status is already 4.
+func (s *BillingService) processRefund(trade *model.OrderTrade) error {
+	accountID, err := s.resolveAccountID(trade.SysShop)
+	if err != nil || accountID == 0 {
+		return nil
+	}
+
+	refundFlowNo := fmt.Sprintf("%s-%s-R", trade.SysShop, trade.TradeNo)
+	if exists, _ := s.billingRepo.FlowNoExists(refundFlowNo); exists {
+		return nil
+	}
+
+	deductFlowNo := fmt.Sprintf("%s-%s-D", trade.SysShop, trade.TradeNo)
+	deductRec, err := s.billingRepo.GetDeductionRecord(deductFlowNo)
+	if err != nil {
+		return fmt.Errorf("deduction record not found for %s: %w", trade.TradeNo, err)
+	}
+
+	if err := s.billingRepo.ProcessRefund(
+		accountID,
+		trade.UID,
+		trade.TradeNo,
+		trade.SourcePlatform,
+		trade.ShopName,
+		refundFlowNo,
+		deductRec.ActualAmount,
+		trade.MarkApprovedAt,
+	); err != nil {
+		return err
+	}
+
+	log.Printf("[Billing] Refunded trade=%s amount=%.2f accountID=%d\n", trade.TradeNo, deductRec.ActualAmount, accountID)
+	return nil
+}
+
 // StartMonthlyDiscountRefresh fires on the 1st of every month at 00:00.
 func (s *BillingService) StartMonthlyDiscountRefresh() {
 	go func() {

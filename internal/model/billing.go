@@ -8,6 +8,7 @@ const (
 	BillingStatusSuccess      int8 = 1 // 扣款成功
 	BillingStatusInsufficient int8 = 2 // 余额不足
 	BillingStatusError        int8 = 3 // 货号/价格错误
+	BillingStatusRefunded     int8 = 4 // 已退款
 )
 
 // Discount level thresholds (applied to both last-month spending and balance snapshot)
