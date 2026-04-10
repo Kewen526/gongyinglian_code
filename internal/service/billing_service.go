@@ -126,9 +126,10 @@ func (s *BillingService) TriggerDeductionAsync(trade *model.OrderTrade) {
 }
 
 // ProcessDeduction performs the full deduction for one order.
-// It is idempotent — if billing_status != 0 it exits immediately.
+// Already-succeeded orders are skipped. Error/insufficient orders are retried (old record overwritten).
 func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
-	if trade.BillingStatus != model.BillingStatusPending {
+	// Only skip if already successfully deducted
+	if trade.BillingStatus == model.BillingStatusSuccess {
 		return nil
 	}
 
@@ -149,9 +150,17 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	originalAmount, calcErr := s.calculateOrderAmount(trade.UID, trade.SourcePlatform)
 	flowNo := fmt.Sprintf("%s-%s-D", trade.SysShop, trade.TradeNo)
 
-	// Check if flow_no already exists (idempotency guard)
+	// Idempotency: if flow_no exists, try to delete retryable (error/insufficient) record.
+	// If it can't be deleted (means it's a success record), skip entirely.
 	if exists, _ := s.billingRepo.FlowNoExists(flowNo); exists {
-		return nil
+		deleted, err := s.billingRepo.DeleteRetryableRecord(flowNo)
+		if err != nil {
+			return err
+		}
+		if !deleted {
+			// Record exists but is not retryable (already succeeded), skip
+			return nil
+		}
 	}
 
 	now := time.Now()
