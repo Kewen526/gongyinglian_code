@@ -216,10 +216,12 @@ func (r *OrderRepo) UpdateBillingStatus(uid string, status int8) error {
 		Update("billing_status", status).Error
 }
 
-// ListPendingBillingOrders returns orders where mark="已审核" and billing_status=0.
+// ListPendingBillingOrders returns orders where mark="已审核" and billing_status is pending/error/insufficient.
 func (r *OrderRepo) ListPendingBillingOrders() ([]model.OrderTrade, error) {
 	var trades []model.OrderTrade
-	err := r.db.Where("mark = ? AND billing_status = ?", "已审核", model.BillingStatusPending).Find(&trades).Error
+	err := r.db.Where("mark = ? AND billing_status IN ?", "已审核",
+		[]int8{model.BillingStatusPending, model.BillingStatusError, model.BillingStatusInsufficient},
+	).Find(&trades).Error
 	return trades, err
 }
 

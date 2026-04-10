@@ -104,6 +104,14 @@ func (r *BillingRepo) FlowNoExists(flowNo string) (bool, error) {
 	return count > 0, err
 }
 
+// DeleteRetryableRecord removes an error/insufficient billing record so it can be retried.
+// Returns true if a record was deleted (i.e., it was retryable).
+func (r *BillingRepo) DeleteRetryableRecord(flowNo string) (bool, error) {
+	result := r.db.Where("flow_no = ? AND status IN ?", flowNo, []string{"error", "insufficient"}).
+		Delete(&model.BillingRecord{})
+	return result.RowsAffected > 0, result.Error
+}
+
 func (r *BillingRepo) CreateBillingRecord(tx *gorm.DB, rec *model.BillingRecord) error {
 	return tx.Create(rec).Error
 }
