@@ -778,6 +778,12 @@ func (s *SyncService) autoReviewOnce() {
 		return
 	}
 	for i := range accounts {
+		// Only supervisors are allowed to run auto-review.
+		// SuperAdmin and TeamLead cover too broad a scope;
+		// Employee-level auto-review is managed by their supervisor.
+		if accounts[i].Role != model.RoleSupervisor {
+			continue
+		}
 		s.processAccountAutoReview(&accounts[i])
 	}
 }
