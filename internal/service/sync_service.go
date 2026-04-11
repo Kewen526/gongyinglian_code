@@ -27,18 +27,23 @@ const (
 	afterSaleSyncDays = 15 // after-sale sync pulls last 15 days
 )
 
+// autoReviewBatchSize is the max orders per WanLiNiu batch-mark API call.
+const autoReviewBatchSize = 200
+
 type SyncService struct {
 	orderRepo      *repository.OrderRepo
 	shopRepo       *repository.ShopRepo
+	accountRepo    *repository.AccountRepo
 	cfg            *config.WanLiNiuConfig
 	billingService *BillingService
 	stopCh         chan struct{}
 }
 
-func NewSyncService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopRepo, cfg *config.WanLiNiuConfig, billingService *BillingService) *SyncService {
+func NewSyncService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopRepo, accountRepo *repository.AccountRepo, cfg *config.WanLiNiuConfig, billingService *BillingService) *SyncService {
 	return &SyncService{
 		orderRepo:      orderRepo,
 		shopRepo:       shopRepo,
+		accountRepo:    accountRepo,
 		cfg:            cfg,
 		billingService: billingService,
 		stopCh:         make(chan struct{}),
@@ -742,4 +747,150 @@ func (s *SyncService) BatchMarkOrders(items []model.MarkItem) error {
 	}
 
 	return nil
+}
+
+// ==================== Auto Review ====================
+
+// StartAutoReview starts the background auto-review task (5-minute interval).
+// It scans accounts with auto_review=true and marks qualifying orders on WanLiNiu.
+func (s *SyncService) StartAutoReview() {
+	go func() {
+		log.Println("[AutoReview] Task started (interval=5m)")
+		s.autoReviewOnce()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.autoReviewOnce()
+			case <-s.stopCh:
+				log.Println("[AutoReview] Task stopped")
+				return
+			}
+		}
+	}()
+}
+
+func (s *SyncService) autoReviewOnce() {
+	accounts, err := s.accountRepo.ListAutoReviewAccounts()
+	if err != nil {
+		log.Printf("[AutoReview] ListAutoReviewAccounts error: %v\n", err)
+		return
+	}
+	for i := range accounts {
+		s.processAccountAutoReview(&accounts[i])
+	}
+}
+
+// processAccountAutoReview handles the full auto-review cycle for one account.
+func (s *SyncService) processAccountAutoReview(account *model.Account) {
+	// Step 1: resolve this account's visible shop IDs
+	shopIDs, err := s.getAutoReviewShopIDs(account)
+	if err != nil {
+		log.Printf("[AutoReview] getAutoReviewShopIDs account=%d: %v\n", account.ID, err)
+		return
+	}
+	if len(shopIDs) == 0 {
+		return
+	}
+
+	// Step 2: convert shop IDs to sys_shop strings (single Pluck query)
+	sysShops, err := s.shopRepo.GetSysShopsByIDs(shopIDs)
+	if err != nil || len(sysShops) == 0 {
+		return
+	}
+
+	// Step 3: fetch paid, un-reviewed candidates (capped at 500)
+	candidates, err := s.orderRepo.ListAutoReviewCandidates(sysShops)
+	if err != nil || len(candidates) == 0 {
+		return
+	}
+
+	// Step 4: balance-check each candidate; collect approvable orders
+	type approvedItem struct {
+		mark  model.MarkItem
+		trade *model.OrderTrade
+	}
+	approved := make([]approvedItem, 0, len(candidates))
+	for i := range candidates {
+		t := &candidates[i]
+		if ok, _ := s.billingService.CanAutoReview(t.SysShop, t.UID, t.SourcePlatform); ok {
+			approved = append(approved, approvedItem{
+				mark:  model.MarkItem{BillCode: t.TradeNo, MarkName: "已审核", Type: 0},
+				trade: t,
+			})
+		}
+	}
+	if len(approved) == 0 {
+		return
+	}
+
+	// Step 5: call WanLiNiu in batches of autoReviewBatchSize, then update DB
+	now := time.Now()
+	for start := 0; start < len(approved); start += autoReviewBatchSize {
+		end := start + autoReviewBatchSize
+		if end > len(approved) {
+			end = len(approved)
+		}
+		batch := approved[start:end]
+
+		markItems := make([]model.MarkItem, len(batch))
+		uids := make([]string, len(batch))
+		for i, a := range batch {
+			markItems[i] = a.mark
+			uids[i] = a.trade.UID
+		}
+
+		// Call WanLiNiu; skip DB update if API fails (will retry next cycle)
+		if err := s.BatchMarkOrders(markItems); err != nil {
+			log.Printf("[AutoReview] BatchMarkOrders account=%d batch=%d-%d: %v\n",
+				account.ID, start, end, err)
+			continue
+		}
+
+		// Bulk DB update (single UPDATE...WHERE uid IN ?)
+		if err := s.orderRepo.BatchMarkApproved(uids, now); err != nil {
+			log.Printf("[AutoReview] BatchMarkApproved DB error: %v\n", err)
+		}
+
+		// Trigger async billing deduction for each marked trade
+		for _, a := range batch {
+			a.trade.Mark = "已审核"
+			a.trade.MarkApprovedAt = &now
+			s.billingService.TriggerDeductionAsync(a.trade)
+		}
+
+		log.Printf("[AutoReview] Account=%d marked %d orders\n", account.ID, len(batch))
+	}
+}
+
+// getAutoReviewShopIDs mirrors OrderService.getEffectiveShopIDs for use in SyncService.
+// SuperAdmin is excluded — auto-review is only relevant for non-admin accounts.
+func (s *SyncService) getAutoReviewShopIDs(account *model.Account) ([]uint64, error) {
+	switch account.Role {
+	case model.RoleEmployee:
+		return s.shopRepo.GetAccountShopIDs(account.ID)
+	case model.RoleSupervisor:
+		empIDs, err := s.accountRepo.GetDirectSubordinateIDs(account.ID)
+		if err != nil {
+			return nil, err
+		}
+		return s.shopRepo.GetShopIDsByAccountIDs(empIDs)
+	case model.RoleTeamLead:
+		supIDs, err := s.accountRepo.GetDirectSubordinateIDs(account.ID)
+		if err != nil {
+			return nil, err
+		}
+		var allEmpIDs []uint64
+		for _, supID := range supIDs {
+			empIDs, err := s.accountRepo.GetDirectSubordinateIDs(supID)
+			if err != nil {
+				return nil, err
+			}
+			allEmpIDs = append(allEmpIDs, empIDs...)
+		}
+		return s.shopRepo.GetShopIDsByAccountIDs(allEmpIDs)
+	}
+	// SuperAdmin or unknown role: skip auto-review
+	return nil, nil
 }

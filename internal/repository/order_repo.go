@@ -246,6 +246,36 @@ func (r *OrderRepo) ListPendingBillingOrders() ([]model.OrderTrade, error) {
 	return trades, err
 }
 
+// ListAutoReviewCandidates returns paid orders not yet marked as 已审核 for the given sys_shop values.
+// Capped at 500 per call to bound memory usage and WanLiNiu batch size.
+// Uses existing idx_sys_shop index for the primary filter.
+func (r *OrderRepo) ListAutoReviewCandidates(sysShops []string) ([]model.OrderTrade, error) {
+	if len(sysShops) == 0 {
+		return nil, nil
+	}
+	var trades []model.OrderTrade
+	err := r.db.
+		Where("sys_shop IN ? AND is_pay = ? AND COALESCE(mark, '') != ?", sysShops, true, "已审核").
+		Order("create_time_ms ASC").
+		Limit(500).
+		Find(&trades).Error
+	return trades, err
+}
+
+// BatchMarkApproved sets mark='已审核' and mark_approved_at for a batch of order UIDs atomically.
+// The WHERE guard (COALESCE(mark,'')!='已审核') makes this idempotent.
+func (r *OrderRepo) BatchMarkApproved(uids []string, approvedAt time.Time) error {
+	if len(uids) == 0 {
+		return nil
+	}
+	return r.db.Model(&model.OrderTrade{}).
+		Where("uid IN ? AND COALESCE(mark, '') != ?", uids, "已审核").
+		Updates(map[string]interface{}{
+			"mark":             "已审核",
+			"mark_approved_at": approvedAt,
+		}).Error
+}
+
 // UpsertSyncState updates or creates a sync state.
 func (r *OrderRepo) UpsertSyncState(key string, lastSyncTimeMs int64) error {
 	return r.db.Clauses(clause.OnConflict{

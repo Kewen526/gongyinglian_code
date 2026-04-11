@@ -93,6 +93,17 @@ func (r *ShopRepo) GetShopIDsByAccountIDs(accountIDs []uint64) ([]uint64, error)
 	return shopIDs, err
 }
 
+// GetSysShopsByIDs returns the sys_shop strings for the given shop IDs.
+// Uses a single Pluck query for minimal overhead.
+func (r *ShopRepo) GetSysShopsByIDs(ids []uint64) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var sysShops []string
+	err := r.db.Model(&model.Shop{}).Where("id IN ?", ids).Pluck("sys_shop", &sysShops).Error
+	return sysShops, err
+}
+
 // ReplaceAccountShops replaces all shop permissions for an account.
 func (r *ShopRepo) ReplaceAccountShops(accountID uint64, shopIDs []uint64) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
