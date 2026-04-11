@@ -269,9 +269,8 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	rec.BalanceBefore = wallet.Balance
 
 	if wallet.Balance < actual {
-		rec.Status = "insufficient"
-		rec.BalanceAfter = wallet.Balance
-		_ = s.billingRepo.DB().Create(rec).Error
+		// Balance insufficient: update order status for retry tracking, but do NOT
+		// create a billing record — keeps the customer billing view clean.
 		_ = s.orderRepo.UpdateBillingStatus(trade.UID, model.BillingStatusInsufficient)
 		return nil
 	}
