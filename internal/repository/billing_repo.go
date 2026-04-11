@@ -400,8 +400,9 @@ func (r *BillingRepo) ListRechargeRequestsByAccountID(accountID uint64, page, pa
 }
 
 // ListBillingRecords queries billing records with filters.
+// Insufficient-balance attempts are permanently excluded from the customer view.
 func (r *BillingRepo) ListBillingRecords(req *model.BillingListReq, accountID uint64) ([]model.BillingRecord, int64, error) {
-	q := r.db.Model(&model.BillingRecord{}).Where("account_id = ?", accountID)
+	q := r.db.Model(&model.BillingRecord{}).Where("account_id = ? AND status != 'insufficient'", accountID)
 
 	// Keyword: order number or flow_no
 	if req.Keyword != "" {
@@ -427,14 +428,13 @@ func (r *BillingRepo) ListBillingRecords(req *model.BillingListReq, accountID ui
 	if req.ShopName != "" {
 		q = q.Where("shop_name = ?", req.ShopName)
 	}
-	// Status filter: "success" means deduct success, "refund" means refund success
+	// Status filter: "success" = deduct success, "refund" = refund success, "error" = price/barcode error.
+	// "insufficient" is never shown to customers (excluded at query base level).
 	switch req.Status {
 	case "success":
 		q = q.Where("type = 'deduct' AND status = 'success'")
 	case "refund":
 		q = q.Where("type = 'refund' AND status = 'success'")
-	case "insufficient":
-		q = q.Where("status = 'insufficient'")
 	case "error":
 		q = q.Where("status = 'error'")
 	}
