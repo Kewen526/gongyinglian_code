@@ -311,7 +311,15 @@ func (s *AccountService) GetAutoReview(accountID uint64) (bool, error) {
 }
 
 // SetAutoReview enables or disables auto-review for an account.
+// Only supervisors (RoleSupervisor) are permitted to use this feature.
 func (s *AccountService) SetAutoReview(accountID uint64, enabled bool) error {
+	account, err := s.repo.GetByID(accountID)
+	if err != nil {
+		return err
+	}
+	if account.Role != model.RoleSupervisor {
+		return errors.New("只有主管账号可以开启自动审核")
+	}
 	return s.repo.SetAutoReview(accountID, enabled)
 }
 
