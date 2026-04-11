@@ -58,7 +58,7 @@ type Product struct {
 	Status       uint8       `json:"status" gorm:"type:tinyint unsigned;not null;default:0;index:idx_status"`
 	Brand        string      `json:"brand" gorm:"type:varchar(128);not null;default:''"`
 	Category     string      `json:"category" gorm:"type:varchar(128);not null;default:''"`
-	Tags         StringSlice `json:"tags" gorm:"column:tags;type:json;not null;default:'[]'"`
+	Tags         StringSlice `json:"tags" gorm:"column:tags;type:json"`
 	Material     string      `json:"material" gorm:"type:varchar(255);not null;default:''"`
 	PatentStatus string      `json:"patent_status" gorm:"type:varchar(128);not null;default:''"`
 	FactoryPrice float64     `json:"factory_price" gorm:"type:decimal(12,2);not null;default:0.00"`
