@@ -165,6 +165,19 @@ func (r *AccountRepo) SaveProductScope(accountID uint64, suppliers, tags []strin
 	}).Error
 }
 
+// SetAutoReview updates the auto_review flag for an account.
+func (r *AccountRepo) SetAutoReview(accountID uint64, enabled bool) error {
+	return r.db.Model(&model.Account{}).Where("id = ?", accountID).Update("auto_review", enabled).Error
+}
+
+// ListAutoReviewAccounts returns all accounts that have auto_review=true.
+// Uses idx_auto_review index for fast lookup.
+func (r *AccountRepo) ListAutoReviewAccounts() ([]model.Account, error) {
+	var accounts []model.Account
+	err := r.db.Where("auto_review = 1").Find(&accounts).Error
+	return accounts, err
+}
+
 func (r *AccountRepo) CreateAccountWithPermissions(account *model.Account, permissions []model.AccountPermission) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(account).Error; err != nil {

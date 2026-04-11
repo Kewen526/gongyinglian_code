@@ -104,14 +104,16 @@ func main() {
 	productService := service.NewProductService(productRepo, accountRepo)
 	billingService := service.NewBillingService(billingRepo, orderRepo, productRepo)
 	orderService := service.NewOrderService(orderRepo, shopRepo, accountRepo, billingService)
-	syncService := service.NewSyncService(orderRepo, shopRepo, &cfg.WanLiNiu, billingService)
+	syncService := service.NewSyncService(orderRepo, shopRepo, accountRepo, &cfg.WanLiNiu, billingService)
 
 	// ---------- Start scheduled tasks ----------
 	syncService.StartAutoSync()
 	syncService.StartAfterSaleSync()
+	syncService.StartAutoReview()
 	defer syncService.Stop()
 	log.Println("[Sync] Order sync service started")
 	log.Println("[Sync] After-sale sync service started")
+	log.Println("[Sync] Auto-review task started")
 
 	billingService.StartAutoDeduct()
 	billingService.StartAutoRefund()

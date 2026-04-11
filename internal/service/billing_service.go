@@ -357,6 +357,31 @@ func (s *BillingService) getOrSkipWallet(accountID uint64) (*model.Wallet, error
 	return wallet, err
 }
 
+// CanAutoReview checks whether the employee owning sysShop can afford the given order.
+// Returns (canAfford, ownerAccountID). Returns (false, 0) on any lookup or price error.
+// Called by the auto-review task before marking an order.
+func (s *BillingService) CanAutoReview(sysShop, tradeUID, platform string) (bool, uint64) {
+	accountID, err := s.resolveAccountID(sysShop)
+	if err != nil || accountID == 0 {
+		return false, 0
+	}
+	wallet, err := s.getOrSkipWallet(accountID)
+	if err != nil || wallet == nil {
+		return false, 0
+	}
+	cost, err := s.calculateOrderAmount(tradeUID, platform)
+	if err != nil {
+		// Price/barcode error — skip auto-review for this order; manual review required.
+		return false, 0
+	}
+	discountRate := wallet.DiscountRate
+	if discountRate == 0 {
+		discountRate = 0.85
+	}
+	actual := math.Round(cost*discountRate*100) / 100
+	return wallet.Balance >= actual, accountID
+}
+
 // ---------- Public API methods ----------
 
 // GetWallet returns wallet info for an account; creates it on first recharge, not here.

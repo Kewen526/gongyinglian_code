@@ -301,6 +301,20 @@ func (s *AccountService) SaveProductScope(accountID uint64, req *model.ProductSc
 	return s.repo.SaveProductScope(accountID, req.Suppliers, req.Tags)
 }
 
+// GetAutoReview returns whether auto-review is enabled for an account.
+func (s *AccountService) GetAutoReview(accountID uint64) (bool, error) {
+	account, err := s.repo.GetByID(accountID)
+	if err != nil {
+		return false, err
+	}
+	return account.AutoReview, nil
+}
+
+// SetAutoReview enables or disables auto-review for an account.
+func (s *AccountService) SetAutoReview(accountID uint64, enabled bool) error {
+	return s.repo.SetAutoReview(accountID, enabled)
+}
+
 func (s *AccountService) UpdatePermissions(accountID uint64, req *model.UpdatePermissionsReq) error {
 	// Verify account exists
 	_, err := s.repo.GetByID(accountID)
