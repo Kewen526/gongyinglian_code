@@ -111,8 +111,8 @@ type AccountListResp struct {
 type AccountProductScope struct {
 	ID        uint64      `json:"id" gorm:"primaryKey;autoIncrement"`
 	AccountID uint64      `json:"account_id" gorm:"not null;uniqueIndex"`
-	Suppliers StringSlice `json:"suppliers" gorm:"type:json;not null;default:'[]'"`
-	Tags      StringSlice `json:"tags" gorm:"type:json;not null;default:'[]'"`
+	Suppliers StringSlice `json:"suppliers" gorm:"type:json"`
+	Tags      StringSlice `json:"tags" gorm:"type:json"`
 	CreatedAt time.Time   `json:"created_at"`
 	UpdatedAt time.Time   `json:"updated_at"`
 }
