@@ -46,6 +46,8 @@ func SetupRouter(
 		adminOnly.PUT("/accounts/:id", accountHandler.UpdateAccount)
 		adminOnly.DELETE("/accounts/:id", accountHandler.DeleteAccount)
 		adminOnly.PUT("/accounts/:id/permissions", accountHandler.UpdatePermissions)
+		adminOnly.GET("/accounts/:id/product-scope", accountHandler.GetProductScope)
+		adminOnly.PUT("/accounts/:id/product-scope", accountHandler.SaveProductScope)
 
 		// Shop permissions for accounts (super admin only)
 		adminOnly.GET("/accounts/:id/shops", orderHandler.GetAccountShops)
@@ -61,6 +63,7 @@ func SetupRouter(
 	{
 		productView.GET("/products", productHandler.ListProducts)
 		productView.GET("/products/:id", productHandler.GetProductDetail)
+		productView.GET("/products/suppliers", productHandler.GetSuppliers)
 	}
 
 	// --- Product: edit permission ---

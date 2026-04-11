@@ -1,31 +1,69 @@
 package model
 
-import "time"
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
+	"time"
+)
 
 // Product status constants
 const (
-	ProductStatusPending = 0 // 待上架
-	ProductStatusOnSale  = 1 // 正常在售
-	ProductStatusOffSale = 2 // 停售
+	ProductStatusPending   = 0 // 待上架
+	ProductStatusOnSale    = 1 // 正常在售
+	ProductStatusOffSale   = 2 // 停售
+	ProductStatusClearance = 3 // 清仓
+	ProductStatusSample    = 4 // 打样
 )
+
+// ValidProductTags is the fixed set of allowed product tags.
+var ValidProductTags = []string{"市场款", "开发款", "A", "B", "C"}
+
+// StringSlice is a JSON-serialized string array stored in a single MySQL column.
+type StringSlice []string
+
+func (s StringSlice) Value() (driver.Value, error) {
+	if s == nil {
+		return "[]", nil
+	}
+	data, err := json.Marshal(s)
+	return string(data), err
+}
+
+func (s *StringSlice) Scan(value interface{}) error {
+	if value == nil {
+		*s = StringSlice{}
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return errors.New("StringSlice: unsupported scan type")
+	}
+	return json.Unmarshal(b, s)
+}
 
 // ---------- Database Models ----------
 
 type Product struct {
-	ID           uint64    `json:"id" gorm:"primaryKey;autoIncrement"`
-	ImageURL     string    `json:"image_url" gorm:"column:image_url;type:varchar(512);not null;default:''"`
-	Name         string    `json:"name" gorm:"type:varchar(255);not null;default:''"`
-	ProductCode  string    `json:"product_code" gorm:"type:varchar(128);not null;default:''"`
-	Supplier     string    `json:"supplier" gorm:"type:varchar(255);not null;default:''"`
-	Status       uint8     `json:"status" gorm:"type:tinyint unsigned;not null;default:0;index:idx_status"`
-	Brand        string    `json:"brand" gorm:"type:varchar(128);not null;default:''"`
-	Category     string    `json:"category" gorm:"type:varchar(128);not null;default:''"`
-	GroupName    string    `json:"group_name" gorm:"type:varchar(128);not null;default:''"`
-	Material     string    `json:"material" gorm:"type:varchar(255);not null;default:''"`
-	PatentStatus string    `json:"patent_status" gorm:"type:varchar(128);not null;default:''"`
-	FactoryPrice float64   `json:"factory_price" gorm:"type:decimal(12,2);not null;default:0.00"`
-	CreatedAt    time.Time `json:"created_at" gorm:"index:idx_created_at;index:idx_created_at_id"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           uint64      `json:"id" gorm:"primaryKey;autoIncrement"`
+	ImageURL     string      `json:"image_url" gorm:"column:image_url;type:varchar(512);not null;default:''"`
+	Name         string      `json:"name" gorm:"type:varchar(255);not null;default:''"`
+	ProductCode  string      `json:"product_code" gorm:"type:varchar(128);not null;default:'';index:idx_product_code"`
+	Supplier     string      `json:"supplier" gorm:"type:varchar(255);not null;default:''"`
+	Status       uint8       `json:"status" gorm:"type:tinyint unsigned;not null;default:0;index:idx_status"`
+	Brand        string      `json:"brand" gorm:"type:varchar(128);not null;default:''"`
+	Category     string      `json:"category" gorm:"type:varchar(128);not null;default:''"`
+	Tags         StringSlice `json:"tags" gorm:"column:tags;type:json;not null;default:'[]'"`
+	Material     string      `json:"material" gorm:"type:varchar(255);not null;default:''"`
+	PatentStatus string      `json:"patent_status" gorm:"type:varchar(128);not null;default:''"`
+	FactoryPrice float64     `json:"factory_price" gorm:"type:decimal(12,2);not null;default:0.00"`
+	CreatedAt    time.Time   `json:"created_at" gorm:"index:idx_created_at;index:idx_created_at_id"`
+	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
 func (Product) TableName() string { return "product" }
@@ -93,18 +131,18 @@ func (ProductVideo) TableName() string { return "product_video" }
 // ---------- Request / Response DTOs ----------
 
 type CreateProductReq struct {
-	ImageURL     string  `json:"image_url"`
-	Name         string  `json:"name" binding:"required"`
-	ProductCode  string  `json:"product_code"`
-	Supplier     string  `json:"supplier"`
-	Status       uint8   `json:"status"`
-	Brand        string  `json:"brand"`
-	Category     string  `json:"category"`
-	GroupName    string  `json:"group_name"`
-	Material     string  `json:"material"`
-	PatentStatus string  `json:"patent_status"`
-	FactoryPrice float64 `json:"factory_price"`
-	// Optional nested sub-resources: if provided, they are created together with the product.
+	ImageURL     string      `json:"image_url"`
+	Name         string      `json:"name" binding:"required"`
+	ProductCode  string      `json:"product_code"`
+	Supplier     string      `json:"supplier"`
+	Status       uint8       `json:"status"`
+	Brand        string      `json:"brand"`
+	Category     string      `json:"category"`
+	Tags         []string    `json:"tags"`
+	Material     string      `json:"material"`
+	PatentStatus string      `json:"patent_status"`
+	FactoryPrice float64     `json:"factory_price"`
+	// Optional nested sub-resources
 	Specs          []CreateSpecReq          `json:"specs"`
 	PlatformPrices []CreatePlatformPriceReq `json:"platform_prices"`
 	SKUs           []CreateSKUReq           `json:"skus"`
@@ -113,20 +151,18 @@ type CreateProductReq struct {
 }
 
 type UpdateProductReq struct {
-	ImageURL     *string  `json:"image_url"`
-	Name         *string  `json:"name"`
-	ProductCode  *string  `json:"product_code"`
-	Supplier     *string  `json:"supplier"`
-	Status       *uint8   `json:"status"`
-	Brand        *string  `json:"brand"`
-	Category     *string  `json:"category"`
-	GroupName    *string  `json:"group_name"`
-	Material     *string  `json:"material"`
-	PatentStatus *string  `json:"patent_status"`
-	FactoryPrice *float64 `json:"factory_price"`
-	// Optional nested sub-resources: if provided (non-nil), existing rows are FULLY REPLACED
-	// with the new list. Passing an empty array clears that sub-resource. Omitting the field
-	// leaves existing rows untouched.
+	ImageURL     *string   `json:"image_url"`
+	Name         *string   `json:"name"`
+	ProductCode  *string   `json:"product_code"`
+	Supplier     *string   `json:"supplier"`
+	Status       *uint8    `json:"status"`
+	Brand        *string   `json:"brand"`
+	Category     *string   `json:"category"`
+	Tags         *[]string `json:"tags"`
+	Material     *string   `json:"material"`
+	PatentStatus *string   `json:"patent_status"`
+	FactoryPrice *float64  `json:"factory_price"`
+	// Optional nested sub-resources: non-nil = fully replace; nil = leave unchanged
 	Specs          *[]CreateSpecReq          `json:"specs"`
 	PlatformPrices *[]CreatePlatformPriceReq `json:"platform_prices"`
 	SKUs           *[]CreateSKUReq           `json:"skus"`
@@ -135,22 +171,26 @@ type UpdateProductReq struct {
 }
 
 type ProductListReq struct {
-	ProductCode string `form:"product_code"`
-	Name        string `form:"name"`
-	Supplier    string `form:"supplier"`
-	GroupName   string `form:"group_name"`
-	StartDate   string `form:"start_date"`
-	EndDate     string `form:"end_date"`
-	PageSize    int    `form:"page_size"`
-	// search_after fields for ES cursor-based pagination
-	SearchAfterTime string `form:"search_after_time"`
+	ProductCode string   `form:"product_code"`
+	Name        string   `form:"name"`
+	Suppliers   []string `form:"suppliers"`  // multi-select supplier filter
+	Tags        []string `form:"tags"`       // multi-select tag filter
+	Status      *uint8   `form:"status"`     // optional status filter
+	StartDate   string   `form:"start_date"`
+	EndDate     string   `form:"end_date"`
+	PageSize    int      `form:"page_size"`
+	// search_after cursor fields for ES pagination (named generically)
+	SearchAfterCode string `form:"search_after_code"`
 	SearchAfterID   string `form:"search_after_id"`
+	// Scope injected internally (not from query params)
+	ScopeSuppliers []string `form:"-"`
+	ScopeTags      []string `form:"-"`
 }
 
 type ProductListResp struct {
 	List            []Product `json:"list"`
 	Total           int64     `json:"total"`
-	SearchAfterTime string    `json:"search_after_time,omitempty"`
+	SearchAfterCode string    `json:"search_after_code,omitempty"`
 	SearchAfterID   string    `json:"search_after_id,omitempty"`
 }
 

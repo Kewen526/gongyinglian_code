@@ -64,10 +64,20 @@ func main() {
 		&model.Wallet{},
 		&model.RechargeRequest{},
 		&model.BillingRecord{},
+		&model.Product{},
+		&model.ProductSpec{},
+		&model.ProductPlatformPrice{},
+		&model.ProductSKU{},
+		&model.ProductDetailImage{},
+		&model.ProductVideo{},
+		&model.AccountProductScope{},
 	); err != nil {
 		log.Fatalf("Failed to auto-migrate tables: %v", err)
 	}
 	log.Println("[MySQL] Tables migrated")
+
+	// Migrate group_name → tags for existing products
+	db.Exec("UPDATE product SET tags = JSON_ARRAY(group_name) WHERE group_name IS NOT NULL AND group_name != '' AND (tags IS NULL OR JSON_LENGTH(tags) = 0)")
 
 	// ---------- Auto-create super admin & seed modules ----------
 	initSuperAdmin(db)
@@ -91,7 +101,7 @@ func main() {
 
 	// ---------- Service Layer ----------
 	accountService := service.NewAccountService(accountRepo, shopRepo)
-	productService := service.NewProductService(productRepo)
+	productService := service.NewProductService(productRepo, accountRepo)
 	billingService := service.NewBillingService(billingRepo, orderRepo, productRepo)
 	orderService := service.NewOrderService(orderRepo, shopRepo, accountRepo, billingService)
 	syncService := service.NewSyncService(orderRepo, shopRepo, &cfg.WanLiNiu, billingService)
