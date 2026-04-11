@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,14 @@ import (
 
 	"gorm.io/gorm"
 )
+
+// makeFlowNo produces a short, deterministic flow number.
+// Format: {prefix}{12 hex chars of MD5(sysShop:tradeNo)} — always 13 chars, collision-free in practice.
+// Prefix: "D" = deduct, "R" = refund.
+func makeFlowNo(prefix, sysShop, tradeNo string) string {
+	h := md5.Sum([]byte(sysShop + ":" + tradeNo))
+	return fmt.Sprintf("%s%x", prefix, h[:6])
+}
 
 // platformFallback maps platform names to their fallback aliases for price lookup.
 var platformFallback = map[string]string{
@@ -110,12 +119,12 @@ func (s *BillingService) processRefund(trade *model.OrderTrade) error {
 		return nil
 	}
 
-	refundFlowNo := fmt.Sprintf("%s-%s-R", trade.SysShop, trade.TradeNo)
+	refundFlowNo := makeFlowNo("R", trade.SysShop, trade.TradeNo)
 	if exists, _ := s.billingRepo.FlowNoExists(refundFlowNo); exists {
 		return nil
 	}
 
-	deductFlowNo := fmt.Sprintf("%s-%s-D", trade.SysShop, trade.TradeNo)
+	deductFlowNo := makeFlowNo("D", trade.SysShop, trade.TradeNo)
 	deductRec, err := s.billingRepo.GetDeductionRecord(deductFlowNo)
 	if err != nil {
 		return fmt.Errorf("deduction record not found for %s: %w", trade.TradeNo, err)
@@ -216,7 +225,7 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 
 	// Compute order amount
 	originalAmount, calcErr := s.calculateOrderAmount(trade.UID, trade.SourcePlatform)
-	flowNo := fmt.Sprintf("%s-%s-D", trade.SysShop, trade.TradeNo)
+	flowNo := makeFlowNo("D", trade.SysShop, trade.TradeNo)
 
 	// Idempotency: if flow_no exists, try to delete retryable (error/insufficient) record.
 	// If it can't be deleted (means it's a success record), skip entirely.
