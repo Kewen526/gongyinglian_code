@@ -279,6 +279,28 @@ func (s *AccountService) DeleteAccount(id uint64) error {
 	return s.repo.DeleteAccount(id)
 }
 
+// GetProductScope returns the product scope for an employee account.
+func (s *AccountService) GetProductScope(accountID uint64) (*model.ProductScopeResp, error) {
+	scope, err := s.repo.GetProductScope(accountID)
+	if err != nil {
+		return &model.ProductScopeResp{Suppliers: []string{}, Tags: []string{}}, nil
+	}
+	suppliers := []string(scope.Suppliers)
+	tags := []string(scope.Tags)
+	if suppliers == nil {
+		suppliers = []string{}
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	return &model.ProductScopeResp{Suppliers: suppliers, Tags: tags}, nil
+}
+
+// SaveProductScope upserts the product scope for an employee account.
+func (s *AccountService) SaveProductScope(accountID uint64, req *model.ProductScopeReq) error {
+	return s.repo.SaveProductScope(accountID, req.Suppliers, req.Tags)
+}
+
 func (s *AccountService) UpdatePermissions(accountID uint64, req *model.UpdatePermissionsReq) error {
 	// Verify account exists
 	_, err := s.repo.GetByID(accountID)

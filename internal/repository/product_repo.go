@@ -250,6 +250,17 @@ func (r *ProductRepo) BatchGetForReindex(lastID uint64, batchSize int) ([]model.
 	return products, err
 }
 
+// GetDistinctSuppliers returns all unique non-empty supplier values from the product table.
+func (r *ProductRepo) GetDistinctSuppliers() ([]string, error) {
+	var suppliers []string
+	err := r.db.Model(&model.Product{}).
+		Distinct("supplier").
+		Where("supplier != ''").
+		Order("supplier ASC").
+		Pluck("supplier", &suppliers).Error
+	return suppliers, err
+}
+
 // ---------- Spec ----------
 
 func (r *ProductRepo) CreateSpec(s *model.ProductSpec) error {

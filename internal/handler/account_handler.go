@@ -148,6 +148,40 @@ func (h *AccountHandler) DeleteAccount(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// GET /api/v1/accounts/:id/product-scope
+func (h *AccountHandler) GetProductScope(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的账号ID")
+		return
+	}
+	scope, err := h.svc.GetProductScope(id)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, scope)
+}
+
+// PUT /api/v1/accounts/:id/product-scope
+func (h *AccountHandler) SaveProductScope(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的账号ID")
+		return
+	}
+	var req model.ProductScopeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	if err := h.svc.SaveProductScope(id, &req); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
 // PUT /api/v1/accounts/:id/permissions (requires super admin)
 func (h *AccountHandler) UpdatePermissions(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)

@@ -95,12 +95,33 @@ func (h *ProductHandler) ListProducts(c *gin.Context) {
 		response.BadRequest(c, "参数错误: "+err.Error())
 		return
 	}
-	result, err := h.svc.ListProducts(&req)
+	// Extract account info from JWT context for scope filtering
+	accountID, _ := c.Get("account_id")
+	role, _ := c.Get("role")
+	var aid uint64
+	var r uint8
+	if v, ok := accountID.(uint64); ok {
+		aid = v
+	}
+	if v, ok := role.(uint8); ok {
+		r = v
+	}
+	result, err := h.svc.ListProducts(&req, aid, r)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
 	response.Success(c, result)
+}
+
+// GET /api/v1/products/suppliers
+func (h *ProductHandler) GetSuppliers(c *gin.Context) {
+	suppliers, err := h.svc.GetDistinctSuppliers()
+	if err != nil {
+		response.InternalError(c, "查询供应商失败: "+err.Error())
+		return
+	}
+	response.Success(c, suppliers)
 }
 
 // ==================== Spec ====================

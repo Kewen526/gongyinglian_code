@@ -30,7 +30,6 @@ func InitES(cfg *config.ElasticsearchConfig) error {
 	}
 	Client = client
 
-	// Verify connection
 	res, err := client.Info()
 	if err != nil {
 		return fmt.Errorf("failed to connect to ES: %w", err)
@@ -42,28 +41,32 @@ func InitES(cfg *config.ElasticsearchConfig) error {
 
 // ProductDocument is the ES document structure for products.
 type ProductDocument struct {
-	ID           uint64  `json:"id"`
-	Name         string  `json:"name"`
-	ProductCode  string  `json:"product_code"`
-	Supplier     string  `json:"supplier"`
-	GroupName    string  `json:"group_name"`
-	Status       uint8   `json:"status"`
-	ImageURL     string  `json:"image_url"`
-	Brand        string  `json:"brand"`
-	Category     string  `json:"category"`
-	Material     string  `json:"material"`
-	PatentStatus string  `json:"patent_status"`
-	FactoryPrice float64 `json:"factory_price"`
-	CreatedAt    string  `json:"created_at"`
+	ID           uint64   `json:"id"`
+	Name         string   `json:"name"`
+	ProductCode  string   `json:"product_code"`
+	Supplier     string   `json:"supplier"`
+	Tags         []string `json:"tags"`
+	Status       uint8    `json:"status"`
+	ImageURL     string   `json:"image_url"`
+	Brand        string   `json:"brand"`
+	Category     string   `json:"category"`
+	Material     string   `json:"material"`
+	PatentStatus string   `json:"patent_status"`
+	FactoryPrice float64  `json:"factory_price"`
+	CreatedAt    string   `json:"created_at"`
 }
 
 func ProductToDocument(p *model.Product) ProductDocument {
+	tags := []string(p.Tags)
+	if tags == nil {
+		tags = []string{}
+	}
 	return ProductDocument{
 		ID:           p.ID,
 		Name:         p.Name,
 		ProductCode:  p.ProductCode,
 		Supplier:     p.Supplier,
-		GroupName:    p.GroupName,
+		Tags:         tags,
 		Status:       p.Status,
 		ImageURL:     p.ImageURL,
 		Brand:        p.Brand,
@@ -113,7 +116,6 @@ func DeleteProduct(ctx context.Context, index string, productID uint64) error {
 		return fmt.Errorf("ES delete error: %w", err)
 	}
 	defer res.Body.Close()
-	// 404 is acceptable (document may not exist)
 	if res.IsError() && res.StatusCode != 404 {
 		body, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("ES delete error [%s]: %s", res.Status(), string(body))
@@ -129,12 +131,27 @@ type SearchResult struct {
 }
 
 // SearchProducts performs a product search with search_after pagination.
+// Sorted by product_code asc, id asc for consistent ordering.
+// Case-insensitive wildcard on product_code.
+// Supports multi-supplier and multi-tag filters.
+// ScopeSuppliers/ScopeTags are employee access restrictions (injected by service layer).
 func SearchProducts(ctx context.Context, index string, req *model.ProductListReq) (*SearchResult, error) {
-	// Build bool query
 	must := []map[string]interface{}{}
 	filter := []map[string]interface{}{}
 
-	// Prefix searches on .keyword (precise, no fuzziness)
+	// Case-insensitive wildcard search on product_code
+	if req.ProductCode != "" {
+		must = append(must, map[string]interface{}{
+			"wildcard": map[string]interface{}{
+				"product_code.keyword": map[string]interface{}{
+					"value":            strings.ToLower(req.ProductCode) + "*",
+					"case_insensitive": true,
+				},
+			},
+		})
+	}
+
+	// Prefix search on name (still exact-case as names are Chinese)
 	if req.Name != "" {
 		must = append(must, map[string]interface{}{
 			"prefix": map[string]interface{}{
@@ -142,24 +159,30 @@ func SearchProducts(ctx context.Context, index string, req *model.ProductListReq
 			},
 		})
 	}
-	if req.ProductCode != "" {
-		must = append(must, map[string]interface{}{
-			"prefix": map[string]interface{}{
-				"product_code.keyword": req.ProductCode,
+
+	// Multi-supplier filter (OR among selected suppliers)
+	if len(req.Suppliers) > 0 {
+		filter = append(filter, map[string]interface{}{
+			"terms": map[string]interface{}{
+				"supplier.keyword": req.Suppliers,
 			},
 		})
 	}
-	if req.Supplier != "" {
-		must = append(must, map[string]interface{}{
-			"prefix": map[string]interface{}{
-				"supplier.keyword": req.Supplier,
+
+	// Multi-tag filter (product must have at least one of the selected tags)
+	if len(req.Tags) > 0 {
+		filter = append(filter, map[string]interface{}{
+			"terms": map[string]interface{}{
+				"tags": req.Tags,
 			},
 		})
 	}
-	if req.GroupName != "" {
-		must = append(must, map[string]interface{}{
-			"prefix": map[string]interface{}{
-				"group_name.keyword": req.GroupName,
+
+	// Status filter
+	if req.Status != nil {
+		filter = append(filter, map[string]interface{}{
+			"term": map[string]interface{}{
+				"status": *req.Status,
 			},
 		})
 	}
@@ -180,6 +203,24 @@ func SearchProducts(ctx context.Context, index string, req *model.ProductListReq
 		})
 	}
 
+	// Employee scope: restrict to allowed suppliers (AND with user filters)
+	if len(req.ScopeSuppliers) > 0 {
+		filter = append(filter, map[string]interface{}{
+			"terms": map[string]interface{}{
+				"supplier.keyword": req.ScopeSuppliers,
+			},
+		})
+	}
+
+	// Employee scope: restrict to allowed tags (intersection)
+	if len(req.ScopeTags) > 0 {
+		filter = append(filter, map[string]interface{}{
+			"terms": map[string]interface{}{
+				"tags": req.ScopeTags,
+			},
+		})
+	}
+
 	if len(must) == 0 {
 		must = append(must, map[string]interface{}{
 			"match_all": map[string]interface{}{},
@@ -194,17 +235,18 @@ func SearchProducts(ctx context.Context, index string, req *model.ProductListReq
 				"filter": filter,
 			},
 		},
+		// Sort by product_code asc for natural ordering, id asc for tie-breaking
 		"sort": []map[string]interface{}{
-			{"created_at": map[string]interface{}{"order": "desc"}},
-			{"id": map[string]interface{}{"order": "desc"}},
+			{"product_code.keyword": map[string]interface{}{"order": "asc"}},
+			{"id": map[string]interface{}{"order": "asc"}},
 		},
-		"_source": []string{"id"},
+		"_source":          []string{"id"},
 		"track_total_hits": true,
 	}
 
 	// search_after pagination
-	if req.SearchAfterTime != "" && req.SearchAfterID != "" {
-		query["search_after"] = []interface{}{req.SearchAfterTime, req.SearchAfterID}
+	if req.SearchAfterCode != "" && req.SearchAfterID != "" {
+		query["search_after"] = []interface{}{req.SearchAfterCode, req.SearchAfterID}
 	}
 
 	var buf bytes.Buffer
@@ -323,7 +365,7 @@ func CreateProductIndex(ctx context.Context, index string) error {
       "name":          { "type": "text", "analyzer": "ik_max_word_analyzer", "search_analyzer": "ik_smart_analyzer", "fields": { "keyword": { "type": "keyword" } } },
       "product_code":  { "type": "text", "analyzer": "ik_max_word_analyzer", "search_analyzer": "ik_smart_analyzer", "fields": { "keyword": { "type": "keyword" } } },
       "supplier":      { "type": "text", "analyzer": "ik_max_word_analyzer", "search_analyzer": "ik_smart_analyzer", "fields": { "keyword": { "type": "keyword" } } },
-      "group_name":    { "type": "text", "analyzer": "ik_max_word_analyzer", "search_analyzer": "ik_smart_analyzer", "fields": { "keyword": { "type": "keyword" } } },
+      "tags":          { "type": "keyword" },
       "status":        { "type": "byte" },
       "image_url":     { "type": "keyword", "index": false },
       "brand":         { "type": "keyword" },

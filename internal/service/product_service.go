@@ -11,11 +11,12 @@ import (
 )
 
 type ProductService struct {
-	repo *repository.ProductRepo
+	repo        *repository.ProductRepo
+	accountRepo *repository.AccountRepo
 }
 
-func NewProductService(repo *repository.ProductRepo) *ProductService {
-	return &ProductService{repo: repo}
+func NewProductService(repo *repository.ProductRepo, accountRepo *repository.AccountRepo) *ProductService {
+	return &ProductService{repo: repo, accountRepo: accountRepo}
 }
 
 // ---------- Product ----------
@@ -29,7 +30,7 @@ func (s *ProductService) CreateProduct(req *model.CreateProductReq) (*model.Prod
 		Status:       req.Status,
 		Brand:        req.Brand,
 		Category:     req.Category,
-		GroupName:    req.GroupName,
+		Tags:         model.StringSlice(req.Tags),
 		Material:     req.Material,
 		PatentStatus: req.PatentStatus,
 		FactoryPrice: req.FactoryPrice,
@@ -143,8 +144,8 @@ func (s *ProductService) UpdateProduct(id uint64, req *model.UpdateProductReq) e
 	if req.Category != nil {
 		updates["category"] = *req.Category
 	}
-	if req.GroupName != nil {
-		updates["group_name"] = *req.GroupName
+	if req.Tags != nil {
+		updates["tags"] = model.StringSlice(*req.Tags)
 	}
 	if req.Material != nil {
 		updates["material"] = *req.Material
@@ -262,7 +263,9 @@ func (s *ProductService) DeleteProduct(id uint64) error {
 	return nil
 }
 
-func (s *ProductService) ListProducts(req *model.ProductListReq) (*model.ProductListResp, error) {
+// ListProducts searches products via ES, optionally applying employee scope.
+// accountID=0 or role != RoleEmployee means no scope restriction.
+func (s *ProductService) ListProducts(req *model.ProductListReq, accountID uint64, role uint8) (*model.ProductListResp, error) {
 	// Validate page size
 	switch req.PageSize {
 	case 20, 50, 100:
@@ -270,13 +273,20 @@ func (s *ProductService) ListProducts(req *model.ProductListReq) (*model.Product
 		req.PageSize = 20
 	}
 
-	// Search via ES
+	// Inject employee scope if applicable
+	if role == model.RoleEmployee && accountID > 0 && s.accountRepo != nil {
+		scope, err := s.accountRepo.GetProductScope(accountID)
+		if err == nil && scope != nil {
+			req.ScopeSuppliers = []string(scope.Suppliers)
+			req.ScopeTags = []string(scope.Tags)
+		}
+	}
+
 	searchResult, err := es.SearchProducts(context.Background(), config.GlobalConfig.Elasticsearch.ProductIndex, req)
 	if err != nil {
 		return nil, fmt.Errorf("ES search failed: %w", err)
 	}
 
-	// Fetch full records from MySQL by IDs
 	products, err := s.repo.GetByIDs(searchResult.IDs)
 	if err != nil {
 		return nil, err
@@ -287,13 +297,17 @@ func (s *ProductService) ListProducts(req *model.ProductListReq) (*model.Product
 		Total: searchResult.Total,
 	}
 
-	// Set search_after cursor for next page
 	if len(searchResult.SearchAfterSort) == 2 {
-		resp.SearchAfterTime = fmt.Sprintf("%v", searchResult.SearchAfterSort[0])
+		resp.SearchAfterCode = fmt.Sprintf("%v", searchResult.SearchAfterSort[0])
 		resp.SearchAfterID = fmt.Sprintf("%v", searchResult.SearchAfterSort[1])
 	}
 
 	return resp, nil
+}
+
+// GetDistinctSuppliers returns all unique supplier values from the product table.
+func (s *ProductService) GetDistinctSuppliers() ([]string, error) {
+	return s.repo.GetDistinctSuppliers()
 }
 
 // ---------- Spec ----------

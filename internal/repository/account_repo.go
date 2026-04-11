@@ -127,6 +127,44 @@ func (r *AccountRepo) GetByIDs(ids []uint64) ([]model.Account, error) {
 	return accounts, err
 }
 
+// GetProductScope returns the product scope for an employee account.
+// Returns nil (no error) if no scope is configured yet.
+func (r *AccountRepo) GetProductScope(accountID uint64) (*model.AccountProductScope, error) {
+	var scope model.AccountProductScope
+	err := r.db.Where("account_id = ?", accountID).First(&scope).Error
+	if err != nil {
+		return nil, err
+	}
+	return &scope, nil
+}
+
+// SaveProductScope upserts the product scope for an account.
+func (r *AccountRepo) SaveProductScope(accountID uint64, suppliers, tags []string) error {
+	s := model.StringSlice(suppliers)
+	t := model.StringSlice(tags)
+	if s == nil {
+		s = model.StringSlice{}
+	}
+	if t == nil {
+		t = model.StringSlice{}
+	}
+	var existing model.AccountProductScope
+	err := r.db.Where("account_id = ?", accountID).First(&existing).Error
+	if err != nil {
+		// Create new record
+		return r.db.Create(&model.AccountProductScope{
+			AccountID: accountID,
+			Suppliers: s,
+			Tags:      t,
+		}).Error
+	}
+	// Update existing
+	return r.db.Model(&existing).Updates(map[string]interface{}{
+		"suppliers": s,
+		"tags":      t,
+	}).Error
+}
+
 func (r *AccountRepo) CreateAccountWithPermissions(account *model.Account, permissions []model.AccountPermission) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(account).Error; err != nil {

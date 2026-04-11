@@ -104,7 +104,30 @@ type AccountListResp struct {
 	List  []AccountDetailResp `json:"list"`
 }
 
-// ---------- Login DTOs ----------
+// ---------- Account Product Scope ----------
+
+// AccountProductScope stores which suppliers and tags an employee can see.
+// Only applies to RoleEmployee accounts that have product module permission.
+type AccountProductScope struct {
+	ID        uint64      `json:"id" gorm:"primaryKey;autoIncrement"`
+	AccountID uint64      `json:"account_id" gorm:"not null;uniqueIndex"`
+	Suppliers StringSlice `json:"suppliers" gorm:"type:json;not null;default:'[]'"`
+	Tags      StringSlice `json:"tags" gorm:"type:json;not null;default:'[]'"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
+}
+
+func (AccountProductScope) TableName() string { return "account_product_scope" }
+
+type ProductScopeReq struct {
+	Suppliers []string `json:"suppliers"`
+	Tags      []string `json:"tags"`
+}
+
+type ProductScopeResp struct {
+	Suppliers []string `json:"suppliers"`
+	Tags      []string `json:"tags"`
+}
 
 type LoginReq struct {
 	Username string `json:"username" binding:"required"`
