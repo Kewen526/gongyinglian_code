@@ -106,6 +106,10 @@ func main() {
 	orderService := service.NewOrderService(orderRepo, shopRepo, accountRepo, billingService)
 	syncService := service.NewSyncService(orderRepo, shopRepo, accountRepo, &cfg.WanLiNiu, billingService)
 
+	// Wire the ERP mark-push hook so BillingService can restore "已审核" on
+	// WanLiNiu after an insufficient-balance order recovers via recharge.
+	billingService.SetMarkPusher(syncService.BatchMarkOrders)
+
 	// ---------- Start scheduled tasks ----------
 	syncService.StartAutoSync()
 	syncService.StartAfterSaleSync()

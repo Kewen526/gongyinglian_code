@@ -13,6 +13,12 @@ const (
 	OrderStatusOther      = 5 // 其他
 )
 
+// Order mark values. Empty string is shown as "未审核" in the frontend.
+const (
+	MarkApproved     = "已审核"
+	MarkDeductFailed = "余额不足扣款失败"
+)
+
 // ProcessStatus —万里牛单据处理状态
 const (
 	ProcessStatusDistributorAudit = -3 // 分销商审核

@@ -294,7 +294,7 @@ func (s *SyncService) saveOrders(rawOrders []map[string]interface{}) (int, error
 		saved++
 
 		// Trigger billing deduction when order is marked "已审核"
-		if trade.Mark == "已审核" && s.billingService != nil {
+		if trade.Mark == model.MarkApproved && s.billingService != nil {
 			_ = s.orderRepo.SetMarkApprovedAtIfNull(trade.UID, time.Now())
 			s.billingService.TriggerDeductionAsync(&trade)
 		}
@@ -749,6 +749,90 @@ func (s *SyncService) BatchMarkOrders(items []model.MarkItem) error {
 	return nil
 }
 
+// MarkBatchResult summarises the outcome of a balance-checked mark batch.
+type MarkBatchResult struct {
+	Pushed               int      `json:"pushed"`                 // successfully pushed to WanLiNiu
+	MarkedDeductFailed   int      `json:"marked_deduct_failed"`   // locally marked "余额不足扣款失败"
+	Skipped              int      `json:"skipped"`                // no wallet / price error / unknown trade
+	InsufficientTradeNos []string `json:"insufficient_trade_nos"` // trade_nos that hit insufficient balance
+}
+
+// BatchMarkOrdersWithBalanceCheck is the审核-aware wrapper around BatchMarkOrders.
+// For every MarkItem whose MarkName == "已审核" (Type=0 overwrite), it runs a
+// balance check on the corresponding order before pushing to WanLiNiu:
+//   - Sufficient          → included in the WanLiNiu batch
+//   - Insufficient balance → locally marked "余额不足扣款失败" (not pushed)
+//   - Price error / no wallet / unknown trade → skipped silently
+// MarkItems with other MarkName values (custom marks, clear operations) are passed
+// through to WanLiNiu unchanged.
+func (s *SyncService) BatchMarkOrdersWithBalanceCheck(items []model.MarkItem) (*MarkBatchResult, error) {
+	result := &MarkBatchResult{}
+	toPush := make([]model.MarkItem, 0, len(items))
+	approvedUIDs := make([]string, 0)
+	insufficientUIDs := make([]string, 0)
+
+	for _, m := range items {
+		// Only apply balance pre-check to "已审核" overwrite operations.
+		if !(m.MarkName == model.MarkApproved && m.Type == 0) {
+			toPush = append(toPush, m)
+			continue
+		}
+		trade, err := s.orderRepo.GetTradeByTradeNo(m.BillCode)
+		if err != nil || trade == nil {
+			// Unknown trade_no — skip silently (frontend may have stale data).
+			result.Skipped++
+			continue
+		}
+		switch s.billingService.CheckDeductible(trade.SysShop, trade.UID, trade.SourcePlatform) {
+		case DeductOK:
+			toPush = append(toPush, m)
+			approvedUIDs = append(approvedUIDs, trade.UID)
+		case DeductInsufficient:
+			insufficientUIDs = append(insufficientUIDs, trade.UID)
+			result.InsufficientTradeNos = append(result.InsufficientTradeNos, trade.TradeNo)
+		case DeductSkip:
+			result.Skipped++
+		}
+	}
+
+	// Apply insufficient-mark transition locally (no WanLiNiu push).
+	if len(insufficientUIDs) > 0 {
+		if err := s.orderRepo.BatchSetMarkDeductFailed(insufficientUIDs); err != nil {
+			log.Printf("[Mark] BatchSetMarkDeductFailed: %v\n", err)
+		}
+		result.MarkedDeductFailed = len(insufficientUIDs)
+	}
+
+	if len(toPush) == 0 {
+		return result, nil
+	}
+
+	// Push to WanLiNiu.
+	if err := s.BatchMarkOrders(toPush); err != nil {
+		return result, err
+	}
+	result.Pushed = len(toPush)
+
+	// For the "已审核" entries we pushed, update local mark + trigger async deduction.
+	if len(approvedUIDs) > 0 {
+		now := time.Now()
+		if err := s.orderRepo.BatchMarkApproved(approvedUIDs, now); err != nil {
+			log.Printf("[Mark] BatchMarkApproved DB error: %v\n", err)
+		}
+		for _, uid := range approvedUIDs {
+			t, err := s.orderRepo.GetTradeByUID(uid)
+			if err != nil || t == nil {
+				continue
+			}
+			t.Mark = model.MarkApproved
+			t.MarkApprovedAt = &now
+			s.billingService.TriggerDeductionAsync(t)
+		}
+	}
+
+	return result, nil
+}
+
 // ==================== Auto Review ====================
 
 // StartAutoReview starts the background auto-review task (5-minute interval).
@@ -812,19 +896,33 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 		return
 	}
 
-	// Step 4: balance-check each candidate; collect approvable orders
+	// Step 4: balance-check each candidate
+	//   DeductOK          → push "已审核" to WanLiNiu
+	//   DeductInsufficient → locally mark "余额不足扣款失败" (no WanLiNiu push)
+	//   DeductSkip         → ignore this round (price error / no wallet / etc.)
 	type approvedItem struct {
 		mark  model.MarkItem
 		trade *model.OrderTrade
 	}
 	approved := make([]approvedItem, 0, len(candidates))
+	insufficientUIDs := make([]string, 0)
 	for i := range candidates {
 		t := &candidates[i]
-		if ok, _ := s.billingService.CanAutoReview(t.SysShop, t.UID, t.SourcePlatform); ok {
+		switch s.billingService.CheckDeductible(t.SysShop, t.UID, t.SourcePlatform) {
+		case DeductOK:
 			approved = append(approved, approvedItem{
-				mark:  model.MarkItem{BillCode: t.TradeNo, MarkName: "已审核", Type: 0},
+				mark:  model.MarkItem{BillCode: t.TradeNo, MarkName: model.MarkApproved, Type: 0},
 				trade: t,
 			})
+		case DeductInsufficient:
+			insufficientUIDs = append(insufficientUIDs, t.UID)
+		}
+	}
+	if len(insufficientUIDs) > 0 {
+		if err := s.orderRepo.BatchSetMarkDeductFailed(insufficientUIDs); err != nil {
+			log.Printf("[AutoReview] BatchSetMarkDeductFailed account=%d: %v\n", account.ID, err)
+		} else {
+			log.Printf("[AutoReview] Account=%d marked %d orders as 余额不足扣款失败\n", account.ID, len(insufficientUIDs))
 		}
 	}
 	if len(approved) == 0 {
@@ -861,7 +959,7 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 
 		// Trigger async billing deduction for each marked trade
 		for _, a := range batch {
-			a.trade.Mark = "已审核"
+			a.trade.Mark = model.MarkApproved
 			a.trade.MarkApprovedAt = &now
 			s.billingService.TriggerDeductionAsync(a.trade)
 		}

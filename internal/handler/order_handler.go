@@ -162,7 +162,10 @@ func (h *OrderHandler) BatchUpdateOrders(c *gin.Context) {
 	response.Success(c, nil)
 }
 
-// POST /api/v1/orders/mark — batch mark orders in WanLiNiu
+// POST /api/v1/orders/mark — batch mark orders in WanLiNiu.
+// "已审核" marks are balance-checked first: insufficient-balance orders are
+// marked "余额不足扣款失败" locally without hitting WanLiNiu. Other mark types
+// are forwarded to WanLiNiu unchanged.
 func (h *OrderHandler) BatchMarkOrders(c *gin.Context) {
 	var req model.BatchMarkReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -173,11 +176,12 @@ func (h *OrderHandler) BatchMarkOrders(c *gin.Context) {
 		response.BadRequest(c, "请求列表不能为空")
 		return
 	}
-	if err := h.syncSvc.BatchMarkOrders(req); err != nil {
+	result, err := h.syncSvc.BatchMarkOrdersWithBalanceCheck(req)
+	if err != nil {
 		response.InternalError(c, "标记失败: "+err.Error())
 		return
 	}
-	response.Success(c, nil)
+	response.Success(c, result)
 }
 
 // PUT /api/v1/accounts/:id/shops — set account's shop permissions
