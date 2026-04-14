@@ -113,19 +113,32 @@ func (h *OrderHandler) ListPlatforms(c *gin.Context) {
 	response.Success(c, platforms)
 }
 
-// GET /api/v1/shops/occupied — shop IDs already assigned to any employee
-// Optional query param: exclude_account_id=X (pass the account being edited so its own shops are not grayed out)
+// GET /api/v1/shops/occupied — shop assignment details visible to the caller.
+// Returns both a simple ID list (occupied_shop_ids) and detailed assignments.
 func (h *OrderHandler) GetOccupiedShopIDs(c *gin.Context) {
-	var excludeID uint64
-	if s := c.Query("exclude_account_id"); s != "" {
-		excludeID, _ = strconv.ParseUint(s, 10, 64)
-	}
-	ids, err := h.orderSvc.GetOccupiedShopIDs(excludeID)
+	accountID, _ := c.Get("account_id")
+	role, _ := c.Get("role")
+
+	details, err := h.orderSvc.GetOccupiedShopsDetail(accountID.(uint64), role.(uint8))
 	if err != nil {
 		response.InternalError(c, "查询失败: "+err.Error())
 		return
 	}
-	response.Success(c, gin.H{"occupied_shop_ids": ids})
+
+	// Build simple ID set for backward compatibility
+	idSet := make(map[uint64]bool)
+	for _, d := range details {
+		idSet[d.ShopID] = true
+	}
+	ids := make([]uint64, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+
+	response.Success(c, gin.H{
+		"occupied_shop_ids": ids,
+		"assignments":       details,
+	})
 }
 
 // GET /api/v1/accounts/:id/shops — get account's shop permissions
@@ -198,7 +211,15 @@ func (h *OrderHandler) UpdateAccountShops(c *gin.Context) {
 		return
 	}
 
-	if err := h.orderSvc.UpdateAccountShops(id, req.ShopIDs); err != nil {
+	// Determine caller: super admin passes 0 (no subset check), others pass their own ID.
+	role, _ := c.Get("role")
+	var callerID uint64
+	if role.(uint8) != model.RoleSuperAdmin {
+		aid, _ := c.Get("account_id")
+		callerID = aid.(uint64)
+	}
+
+	if err := h.orderSvc.UpdateAccountShops(id, req.ShopIDs, callerID); err != nil {
 		response.InternalError(c, "更新失败: "+err.Error())
 		return
 	}

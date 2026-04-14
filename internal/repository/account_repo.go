@@ -194,3 +194,54 @@ func (r *AccountRepo) CreateAccountWithPermissions(account *model.Account, permi
 		return nil
 	})
 }
+
+// GetAllDescendantIDs returns all descendant account IDs of the given account
+// (direct children, grandchildren, etc.) via iterative BFS.
+func (r *AccountRepo) GetAllDescendantIDs(accountID uint64) ([]uint64, error) {
+	var all []uint64
+	queue := []uint64{accountID}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		children, err := r.GetDirectSubordinateIDs(current)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, children...)
+		queue = append(queue, children...)
+	}
+	return all, nil
+}
+
+// IsDescendantOf checks whether accountID is a descendant of ancestorID.
+func (r *AccountRepo) IsDescendantOf(accountID, ancestorID uint64) (bool, error) {
+	current := accountID
+	for i := 0; i < 10; i++ { // max depth guard
+		acc, err := r.GetByID(current)
+		if err != nil {
+			return false, err
+		}
+		if acc.ParentID == nil {
+			return false, nil
+		}
+		if *acc.ParentID == ancestorID {
+			return true, nil
+		}
+		current = *acc.ParentID
+	}
+	return false, nil
+}
+
+// ListSubordinateAccounts returns direct subordinate accounts (for non-super-admin listing).
+func (r *AccountRepo) ListSubordinateAccounts(parentID uint64) ([]model.Account, error) {
+	descendantIDs, err := r.GetAllDescendantIDs(parentID)
+	if err != nil {
+		return nil, err
+	}
+	if len(descendantIDs) == 0 {
+		return []model.Account{}, nil
+	}
+	var accounts []model.Account
+	err = r.db.Where("id IN ?", descendantIDs).Order("id ASC").Find(&accounts).Error
+	return accounts, err
+}

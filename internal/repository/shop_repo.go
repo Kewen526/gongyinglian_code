@@ -60,8 +60,8 @@ func (r *ShopRepo) GetAccountShopIDs(accountID uint64) ([]uint64, error) {
 	return shopIDs, err
 }
 
-// GetOccupiedShopIDs returns all shop IDs currently assigned to any employee,
-// optionally excluding one account (used when editing an existing employee's shops).
+// GetOccupiedShopIDs returns all shop IDs currently assigned to any account,
+// optionally excluding one account (used when editing an existing account's shops).
 func (r *ShopRepo) GetOccupiedShopIDs(excludeAccountID uint64) ([]uint64, error) {
 	var shopIDs []uint64
 	q := r.db.Model(&model.AccountShop{})
@@ -72,13 +72,58 @@ func (r *ShopRepo) GetOccupiedShopIDs(excludeAccountID uint64) ([]uint64, error)
 	return shopIDs, err
 }
 
-// IsShopAssignedToOther returns true if the shop is already assigned to any account other than excludeAccountID.
-func (r *ShopRepo) IsShopAssignedToOther(shopID, excludeAccountID uint64) (bool, error) {
-	var count int64
-	err := r.db.Model(&model.AccountShop{}).
-		Where("shop_id = ? AND account_id != ?", shopID, excludeAccountID).
-		Count(&count).Error
-	return count > 0, err
+// IsShopAssignedToSibling checks per-layer mutual exclusion.
+// "Siblings" = accounts that share the same parent_id AND the same role,
+// excluding the target account itself.
+// For team leads (parent_id IS NULL), siblings are all other team leads.
+func (r *ShopRepo) IsShopAssignedToSibling(shopID uint64, targetAccountID uint64, targetRole uint8, targetParentID *uint64) (bool, uint64, error) {
+	// Find sibling account IDs (same role, same parent, excluding self)
+	siblingQ := r.db.Model(&model.Account{}).
+		Where("role = ? AND id != ?", targetRole, targetAccountID)
+	if targetParentID != nil {
+		siblingQ = siblingQ.Where("parent_id = ?", *targetParentID)
+	} else {
+		siblingQ = siblingQ.Where("parent_id IS NULL")
+	}
+
+	var siblingIDs []uint64
+	if err := siblingQ.Pluck("id", &siblingIDs).Error; err != nil {
+		return false, 0, err
+	}
+	if len(siblingIDs) == 0 {
+		return false, 0, nil
+	}
+
+	// Check if any sibling has this shop
+	var as model.AccountShop
+	err := r.db.Where("shop_id = ? AND account_id IN ?", shopID, siblingIDs).First(&as).Error
+	if err != nil {
+		return false, 0, nil // not found
+	}
+	return true, as.AccountID, nil
+}
+
+// GetOccupiedShopsDetail returns shop assignment details for display.
+// Each shop that is assigned to any account is returned with the account info.
+type ShopAssignment struct {
+	ShopID    uint64 `json:"shop_id"`
+	AccountID uint64 `json:"account_id"`
+	Username  string `json:"username"`
+	RealName  string `json:"real_name"`
+	Role      uint8  `json:"role"`
+}
+
+func (r *ShopRepo) GetOccupiedShopsDetail(scopeShopIDs []uint64) ([]ShopAssignment, error) {
+	if len(scopeShopIDs) == 0 {
+		return []ShopAssignment{}, nil
+	}
+	var results []ShopAssignment
+	err := r.db.Table("account_shop").
+		Select("account_shop.shop_id, account_shop.account_id, account.username, account.real_name, account.role").
+		Joins("JOIN account ON account.id = account_shop.account_id").
+		Where("account_shop.shop_id IN ?", scopeShopIDs).
+		Scan(&results).Error
+	return results, err
 }
 
 // GetShopIDsByAccountIDs returns all shop IDs assigned to any of the given account IDs.
