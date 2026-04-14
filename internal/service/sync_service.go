@@ -968,33 +968,11 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 	}
 }
 
-// getAutoReviewShopIDs mirrors OrderService.getEffectiveShopIDs for use in SyncService.
+// getAutoReviewShopIDs returns the shop IDs for the given account.
 // SuperAdmin is excluded — auto-review is only relevant for non-admin accounts.
 func (s *SyncService) getAutoReviewShopIDs(account *model.Account) ([]uint64, error) {
-	switch account.Role {
-	case model.RoleEmployee:
-		return s.shopRepo.GetAccountShopIDs(account.ID)
-	case model.RoleSupervisor:
-		empIDs, err := s.accountRepo.GetDirectSubordinateIDs(account.ID)
-		if err != nil {
-			return nil, err
-		}
-		return s.shopRepo.GetShopIDsByAccountIDs(empIDs)
-	case model.RoleTeamLead:
-		supIDs, err := s.accountRepo.GetDirectSubordinateIDs(account.ID)
-		if err != nil {
-			return nil, err
-		}
-		var allEmpIDs []uint64
-		for _, supID := range supIDs {
-			empIDs, err := s.accountRepo.GetDirectSubordinateIDs(supID)
-			if err != nil {
-				return nil, err
-			}
-			allEmpIDs = append(allEmpIDs, empIDs...)
-		}
-		return s.shopRepo.GetShopIDsByAccountIDs(allEmpIDs)
+	if account.Role == model.RoleSuperAdmin {
+		return nil, nil
 	}
-	// SuperAdmin or unknown role: skip auto-review
-	return nil, nil
+	return s.shopRepo.GetAccountShopIDs(account.ID)
 }

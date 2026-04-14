@@ -36,22 +36,22 @@ func SetupRouter(
 	auth.POST("/upload/video", uploadHandler.UploadVideo)
 	auth.POST("/upload/file", uploadHandler.UploadFile)
 
-	// --- Account management (super admin only) ---
-	adminOnly := auth.Group("")
-	adminOnly.Use(middleware.RequireSuperAdmin())
+	// --- Account management (super admin + team lead + supervisor) ---
+	accountMgmt := auth.Group("")
+	accountMgmt.Use(middleware.RequireAccountManager())
 	{
-		adminOnly.GET("/accounts", accountHandler.ListAccounts)
-		adminOnly.POST("/accounts", accountHandler.CreateAccount)
-		adminOnly.GET("/accounts/:id", accountHandler.GetAccountDetail)
-		adminOnly.PUT("/accounts/:id", accountHandler.UpdateAccount)
-		adminOnly.DELETE("/accounts/:id", accountHandler.DeleteAccount)
-		adminOnly.PUT("/accounts/:id/permissions", accountHandler.UpdatePermissions)
-		adminOnly.GET("/accounts/:id/product-scope", accountHandler.GetProductScope)
-		adminOnly.PUT("/accounts/:id/product-scope", accountHandler.SaveProductScope)
+		accountMgmt.GET("/accounts", accountHandler.ListAccounts)
+		accountMgmt.POST("/accounts", accountHandler.CreateAccount)
+		accountMgmt.GET("/accounts/:id", accountHandler.GetAccountDetail)
+		accountMgmt.PUT("/accounts/:id", accountHandler.UpdateAccount)
+		accountMgmt.DELETE("/accounts/:id", accountHandler.DeleteAccount)
+		accountMgmt.PUT("/accounts/:id/permissions", accountHandler.UpdatePermissions)
+		accountMgmt.GET("/accounts/:id/product-scope", accountHandler.GetProductScope)
+		accountMgmt.PUT("/accounts/:id/product-scope", accountHandler.SaveProductScope)
 
-		// Shop permissions for accounts (super admin only)
-		adminOnly.GET("/accounts/:id/shops", orderHandler.GetAccountShops)
-		adminOnly.PUT("/accounts/:id/shops", orderHandler.UpdateAccountShops)
+		// Shop permissions for accounts
+		accountMgmt.GET("/accounts/:id/shops", orderHandler.GetAccountShops)
+		accountMgmt.PUT("/accounts/:id/shops", orderHandler.UpdateAccountShops)
 	}
 
 	// --- Modules (any logged-in user) ---

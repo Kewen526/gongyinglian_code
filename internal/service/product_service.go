@@ -263,8 +263,9 @@ func (s *ProductService) DeleteProduct(id uint64) error {
 	return nil
 }
 
-// ListProducts searches products via ES, optionally applying employee scope.
-// accountID=0 or role != RoleEmployee means no scope restriction.
+// ListProducts searches products via ES, applying the caller's product scope.
+// Super admin sees everything; all other roles are restricted to their configured
+// AccountProductScope.  No scope configured → empty result (not "all").
 func (s *ProductService) ListProducts(req *model.ProductListReq, accountID uint64, role uint8) (*model.ProductListResp, error) {
 	// Validate page size
 	switch req.PageSize {
@@ -273,13 +274,14 @@ func (s *ProductService) ListProducts(req *model.ProductListReq, accountID uint6
 		req.PageSize = 20
 	}
 
-	// Inject employee scope if applicable
-	if role == model.RoleEmployee && accountID > 0 && s.accountRepo != nil {
+	// Non-super-admin: inject scope filters.  No scope → return empty.
+	if role != model.RoleSuperAdmin && accountID > 0 && s.accountRepo != nil {
 		scope, err := s.accountRepo.GetProductScope(accountID)
-		if err == nil && scope != nil {
-			req.ScopeSuppliers = []string(scope.Suppliers)
-			req.ScopeTags = []string(scope.Tags)
+		if err != nil || scope == nil || (len(scope.Suppliers) == 0 && len(scope.Tags) == 0) {
+			return &model.ProductListResp{List: []model.Product{}, Total: 0}, nil
 		}
+		req.ScopeSuppliers = []string(scope.Suppliers)
+		req.ScopeTags = []string(scope.Tags)
 	}
 
 	searchResult, err := es.SearchProducts(context.Background(), config.GlobalConfig.Elasticsearch.ProductIndex, req)

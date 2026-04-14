@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"supply-chain/internal/model"
 	"supply-chain/internal/repository"
 
@@ -34,7 +35,23 @@ func (s *AccountService) Login(req *model.LoginReq) (*model.Account, error) {
 	return account, nil
 }
 
-func (s *AccountService) CreateAccount(req *model.CreateAccountReq) (*model.Account, error) {
+// canManageTarget checks if the caller can manage the target account.
+// Super admin can manage anyone. Others can only manage their descendants.
+func (s *AccountService) canManageTarget(callerID uint64, callerRole uint8, targetID uint64) error {
+	if callerRole == model.RoleSuperAdmin {
+		return nil
+	}
+	isDesc, err := s.repo.IsDescendantOf(targetID, callerID)
+	if err != nil {
+		return errors.New("权限验证失败")
+	}
+	if !isDesc {
+		return errors.New("无权操作该账号")
+	}
+	return nil
+}
+
+func (s *AccountService) CreateAccount(req *model.CreateAccountReq, callerID uint64, callerRole uint8) (*model.Account, error) {
 	// Check if username already exists
 	_, err := s.repo.GetByUsername(req.Username)
 	if err == nil {
@@ -42,6 +59,13 @@ func (s *AccountService) CreateAccount(req *model.CreateAccountReq) (*model.Acco
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
+	}
+
+	// Hierarchy enforcement for non-super-admin callers
+	if callerRole != model.RoleSuperAdmin {
+		if err := s.validateCreateHierarchy(req, callerID, callerRole); err != nil {
+			return nil, err
+		}
 	}
 
 	// Validate parent based on role
@@ -73,10 +97,81 @@ func (s *AccountService) CreateAccount(req *model.CreateAccountReq) (*model.Acco
 		})
 	}
 
+	// Permission subset validation for non-super-admin
+	if callerRole != model.RoleSuperAdmin && len(perms) > 0 {
+		if err := s.validatePermissionSubset(callerID, perms); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := s.repo.CreateAccountWithPermissions(account, perms); err != nil {
 		return nil, err
 	}
 	return account, nil
+}
+
+// validateCreateHierarchy ensures the caller can create an account with the given role/parent.
+func (s *AccountService) validateCreateHierarchy(req *model.CreateAccountReq, callerID uint64, callerRole uint8) error {
+	switch callerRole {
+	case model.RoleTeamLead:
+		// Team lead can create: supervisor (parent=self) or employee (parent=one of their supervisors)
+		switch req.Role {
+		case model.RoleSupervisor:
+			if req.ParentID == nil || *req.ParentID != callerID {
+				return errors.New("团队负责人只能创建自己下属的主管")
+			}
+		case model.RoleEmployee:
+			if req.ParentID == nil {
+				return errors.New("创建员工时必须指定所属主管")
+			}
+			// Parent must be a supervisor who is a descendant of this team lead
+			isDesc, err := s.repo.IsDescendantOf(*req.ParentID, callerID)
+			if err != nil {
+				return errors.New("权限验证失败")
+			}
+			if !isDesc {
+				return errors.New("只能为自己下属的主管创建员工")
+			}
+		default:
+			return errors.New("团队负责人无权创建该角色的账号")
+		}
+	case model.RoleSupervisor:
+		// Supervisor can only create employees under themselves
+		if req.Role != model.RoleEmployee {
+			return errors.New("主管只能创建员工账号")
+		}
+		if req.ParentID == nil || *req.ParentID != callerID {
+			return errors.New("主管只能创建自己下属的员工")
+		}
+	default:
+		return errors.New("无权创建账号")
+	}
+	return nil
+}
+
+// validatePermissionSubset ensures the permissions being assigned are a subset of the caller's own.
+func (s *AccountService) validatePermissionSubset(callerID uint64, perms []model.AccountPermission) error {
+	callerPerms, err := s.repo.GetPermissionsByAccountID(callerID)
+	if err != nil {
+		return errors.New("获取权限失败")
+	}
+	callerPermMap := make(map[uint64]model.AccountPermission, len(callerPerms))
+	for _, p := range callerPerms {
+		callerPermMap[p.ModuleID] = p
+	}
+	for _, p := range perms {
+		cp, ok := callerPermMap[p.ModuleID]
+		if !ok {
+			return fmt.Errorf("无权分配模块ID=%d的权限", p.ModuleID)
+		}
+		if p.CanView == 1 && cp.CanView == 0 && cp.CanEdit == 0 {
+			return fmt.Errorf("无权分配模块ID=%d的查看权限", p.ModuleID)
+		}
+		if p.CanEdit == 1 && cp.CanEdit == 0 {
+			return fmt.Errorf("无权分配模块ID=%d的编辑权限", p.ModuleID)
+		}
+	}
+	return nil
 }
 
 // validateParent checks that the parent_id matches the required role hierarchy.
@@ -113,8 +208,16 @@ func (s *AccountService) GetAllModules() ([]model.Module, error) {
 	return s.repo.GetAllModules()
 }
 
-// ListAccounts returns a paginated list of accounts with their permissions and shop_ids.
-func (s *AccountService) ListAccounts(page, pageSize int) (*model.AccountListResp, error) {
+// ListAccounts returns accounts visible to the caller.
+// Super admin sees all (paginated); others see only their descendants.
+func (s *AccountService) ListAccounts(page, pageSize int, callerID uint64, callerRole uint8) (*model.AccountListResp, error) {
+	if callerRole == model.RoleSuperAdmin {
+		return s.listAllAccounts(page, pageSize)
+	}
+	return s.listSubordinateAccounts(callerID)
+}
+
+func (s *AccountService) listAllAccounts(page, pageSize int) (*model.AccountListResp, error) {
 	accounts, total, err := s.repo.ListAccounts(page, pageSize)
 	if err != nil {
 		return nil, err
@@ -131,6 +234,27 @@ func (s *AccountService) ListAccounts(page, pageSize int) (*model.AccountListRes
 
 	return &model.AccountListResp{
 		Total: total,
+		List:  list,
+	}, nil
+}
+
+func (s *AccountService) listSubordinateAccounts(callerID uint64) (*model.AccountListResp, error) {
+	accounts, err := s.repo.ListSubordinateAccounts(callerID)
+	if err != nil {
+		return nil, err
+	}
+
+	list := make([]model.AccountDetailResp, 0, len(accounts))
+	for _, acc := range accounts {
+		detail, err := s.GetAccountDetail(acc.ID)
+		if err != nil {
+			continue
+		}
+		list = append(list, *detail)
+	}
+
+	return &model.AccountListResp{
+		Total: int64(len(list)),
 		List:  list,
 	}, nil
 }
@@ -208,8 +332,13 @@ func (s *AccountService) GetAccountDetail(id uint64) (*model.AccountDetailResp, 
 	}, nil
 }
 
-// UpdateAccount updates account basic info (username/password/real_name/role).
-func (s *AccountService) UpdateAccount(id uint64, req *model.UpdateAccountReq) error {
+// UpdateAccount updates account basic info with hierarchy enforcement.
+func (s *AccountService) UpdateAccount(id uint64, req *model.UpdateAccountReq, callerID uint64, callerRole uint8) error {
+	// Hierarchy check
+	if err := s.canManageTarget(callerID, callerRole, id); err != nil {
+		return err
+	}
+
 	// Verify account exists
 	existing, err := s.repo.GetByID(id)
 	if err != nil {
@@ -267,8 +396,8 @@ func (s *AccountService) UpdateAccount(id uint64, req *model.UpdateAccountReq) e
 	return s.repo.UpdateAccount(id, updates)
 }
 
-// DeleteAccount deletes an account. Super admin cannot be deleted.
-func (s *AccountService) DeleteAccount(id uint64) error {
+// DeleteAccount deletes an account with hierarchy enforcement.
+func (s *AccountService) DeleteAccount(id uint64, callerID uint64, callerRole uint8) error {
 	account, err := s.repo.GetByID(id)
 	if err != nil {
 		return err
@@ -276,10 +405,14 @@ func (s *AccountService) DeleteAccount(id uint64) error {
 	if account.Role == model.RoleSuperAdmin {
 		return errors.New("超级管理员账号不可删除")
 	}
+	// Hierarchy check
+	if err := s.canManageTarget(callerID, callerRole, id); err != nil {
+		return err
+	}
 	return s.repo.DeleteAccount(id)
 }
 
-// GetProductScope returns the product scope for an employee account.
+// GetProductScope returns the product scope for an account.
 func (s *AccountService) GetProductScope(accountID uint64) (*model.ProductScopeResp, error) {
 	scope, err := s.repo.GetProductScope(accountID)
 	if err != nil {
@@ -296,9 +429,51 @@ func (s *AccountService) GetProductScope(accountID uint64) (*model.ProductScopeR
 	return &model.ProductScopeResp{Suppliers: suppliers, Tags: tags}, nil
 }
 
-// SaveProductScope upserts the product scope for an employee account.
-func (s *AccountService) SaveProductScope(accountID uint64, req *model.ProductScopeReq) error {
+// SaveProductScope upserts the product scope with hierarchy and subset validation.
+func (s *AccountService) SaveProductScope(accountID uint64, req *model.ProductScopeReq, callerID uint64, callerRole uint8) error {
+	// Hierarchy check
+	if err := s.canManageTarget(callerID, callerRole, accountID); err != nil {
+		return err
+	}
+
+	// For non-super-admin, validate scope is subset of caller's own scope
+	if callerRole != model.RoleSuperAdmin {
+		if err := s.validateScopeSubset(callerID, req.Suppliers, req.Tags); err != nil {
+			return err
+		}
+	}
+
 	return s.repo.SaveProductScope(accountID, req.Suppliers, req.Tags)
+}
+
+// validateScopeSubset ensures the suppliers/tags are a subset of the caller's own scope.
+func (s *AccountService) validateScopeSubset(callerID uint64, suppliers, tags []string) error {
+	callerScope, err := s.repo.GetProductScope(callerID)
+	if err != nil || callerScope == nil {
+		return errors.New("您尚未配置商品可视范围，无法为下属分配")
+	}
+
+	callerSupplierSet := make(map[string]bool, len(callerScope.Suppliers))
+	for _, sup := range callerScope.Suppliers {
+		callerSupplierSet[sup] = true
+	}
+	for _, sup := range suppliers {
+		if !callerSupplierSet[sup] {
+			return fmt.Errorf("供应商 %s 不在您的可视范围内", sup)
+		}
+	}
+
+	callerTagSet := make(map[string]bool, len(callerScope.Tags))
+	for _, tag := range callerScope.Tags {
+		callerTagSet[tag] = true
+	}
+	for _, tag := range tags {
+		if !callerTagSet[tag] {
+			return fmt.Errorf("标签 %s 不在您的可视范围内", tag)
+		}
+	}
+
+	return nil
 }
 
 // GetAutoReview returns whether auto-review is enabled for an account.
@@ -323,7 +498,13 @@ func (s *AccountService) SetAutoReview(accountID uint64, enabled bool) error {
 	return s.repo.SetAutoReview(accountID, enabled)
 }
 
-func (s *AccountService) UpdatePermissions(accountID uint64, req *model.UpdatePermissionsReq) error {
+// UpdatePermissions replaces permissions with hierarchy and subset validation.
+func (s *AccountService) UpdatePermissions(accountID uint64, req *model.UpdatePermissionsReq, callerID uint64, callerRole uint8) error {
+	// Hierarchy check
+	if err := s.canManageTarget(callerID, callerRole, accountID); err != nil {
+		return err
+	}
+
 	// Verify account exists
 	_, err := s.repo.GetByID(accountID)
 	if err != nil {
@@ -338,6 +519,13 @@ func (s *AccountService) UpdatePermissions(accountID uint64, req *model.UpdatePe
 			CanView:   p.CanView,
 			CanEdit:   p.CanEdit,
 		})
+	}
+
+	// Permission subset validation for non-super-admin
+	if callerRole != model.RoleSuperAdmin && len(perms) > 0 {
+		if err := s.validatePermissionSubset(callerID, perms); err != nil {
+			return err
+		}
 	}
 
 	return s.repo.ReplacePermissions(accountID, perms)

@@ -99,6 +99,26 @@ func RequireSuperAdmin() gin.HandlerFunc {
 	}
 }
 
+// RequireAccountManager ensures the current user can manage accounts.
+// Allowed: super admin (0), team lead (1), supervisor (2).
+func RequireAccountManager() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, exists := c.Get("role")
+		if !exists {
+			response.Error(c, 401, "未登录")
+			c.Abort()
+			return
+		}
+		r := role.(uint8)
+		if r != model.RoleSuperAdmin && r != model.RoleTeamLead && r != model.RoleSupervisor {
+			response.Forbidden(c, "无账号管理权限")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 // RequireModulePermission checks that the current user has the specified
 // permission (view or edit) on the given module code.
 // Super admin bypasses all checks.

@@ -19,37 +19,13 @@ func NewOrderService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopR
 	return &OrderService{orderRepo: orderRepo, shopRepo: shopRepo, accountRepo: accountRepo, billingService: billingService}
 }
 
-// getEffectiveShopIDs returns the shop IDs visible to the given account based on hierarchy.
-// SuperAdmin → nil (all shops); Employee → own shops;
-// Supervisor → shops of direct employees; TeamLead → shops of employees under their supervisors.
+// getEffectiveShopIDs returns the shop IDs visible to the given account.
+// SuperAdmin → nil (all shops); all other roles → own account_shop records.
 func (s *OrderService) getEffectiveShopIDs(accountID uint64, role uint8) ([]uint64, error) {
-	switch role {
-	case model.RoleSuperAdmin:
+	if role == model.RoleSuperAdmin {
 		return nil, nil
-	case model.RoleEmployee:
-		return s.shopRepo.GetAccountShopIDs(accountID)
-	case model.RoleSupervisor:
-		empIDs, err := s.accountRepo.GetDirectSubordinateIDs(accountID)
-		if err != nil {
-			return nil, err
-		}
-		return s.shopRepo.GetShopIDsByAccountIDs(empIDs)
-	case model.RoleTeamLead:
-		supIDs, err := s.accountRepo.GetDirectSubordinateIDs(accountID)
-		if err != nil {
-			return nil, err
-		}
-		var allEmpIDs []uint64
-		for _, supID := range supIDs {
-			empIDs, err := s.accountRepo.GetDirectSubordinateIDs(supID)
-			if err != nil {
-				return nil, err
-			}
-			allEmpIDs = append(allEmpIDs, empIDs...)
-		}
-		return s.shopRepo.GetShopIDsByAccountIDs(allEmpIDs)
 	}
-	return []uint64{}, nil
+	return s.shopRepo.GetAccountShopIDs(accountID)
 }
 
 // ListOrders returns paginated orders with permission filtering.
@@ -181,31 +157,80 @@ func (s *OrderService) GetOccupiedShopIDs(excludeAccountID uint64) ([]uint64, er
 	return ids, nil
 }
 
+// GetOccupiedShopsDetail returns detailed assignment info for shops visible to the caller.
+// Super admin sees all; others see only shops within their own scope.
+func (s *OrderService) GetOccupiedShopsDetail(callerID uint64, callerRole uint8) ([]repository.ShopAssignment, error) {
+	var scopeShopIDs []uint64
+	if callerRole != model.RoleSuperAdmin {
+		ids, err := s.shopRepo.GetAccountShopIDs(callerID)
+		if err != nil {
+			return nil, err
+		}
+		scopeShopIDs = ids
+	} else {
+		// Super admin: get all shop IDs
+		shops, err := s.shopRepo.ListAll()
+		if err != nil {
+			return nil, err
+		}
+		for _, shop := range shops {
+			scopeShopIDs = append(scopeShopIDs, shop.ID)
+		}
+	}
+	return s.shopRepo.GetOccupiedShopsDetail(scopeShopIDs)
+}
+
 // GetAccountShops returns the shop IDs assigned to an account.
 func (s *OrderService) GetAccountShops(accountID uint64) ([]uint64, error) {
 	return s.shopRepo.GetAccountShopIDs(accountID)
 }
 
 // UpdateAccountShops replaces shop assignments for an account.
-// Only employees (role=3) may have shops directly assigned.
-// Each shop may only belong to one employee at a time.
-func (s *OrderService) UpdateAccountShops(accountID uint64, shopIDs []uint64) error {
+// All roles (team lead / supervisor / employee) may have shops assigned.
+// Per-layer mutual exclusion: among siblings (same parent + same role), shops
+// cannot overlap. callerID=0 means super admin (no subset check).
+func (s *OrderService) UpdateAccountShops(accountID uint64, shopIDs []uint64, callerID uint64) error {
 	account, err := s.accountRepo.GetByID(accountID)
 	if err != nil {
 		return errors.New("账号不存在")
 	}
-	if account.Role != model.RoleEmployee {
-		return errors.New("只能为员工分配店铺，主管和负责人通过下级员工继承可见范围")
-	}
-	for _, shopID := range shopIDs {
-		occupied, err := s.shopRepo.IsShopAssignedToOther(shopID, accountID)
+
+	// If caller is not super admin, shops must be a subset of caller's own shops.
+	if callerID > 0 {
+		callerShops, err := s.shopRepo.GetAccountShopIDs(callerID)
 		if err != nil {
 			return err
 		}
-		if occupied {
-			return fmt.Errorf("店铺ID %d 已分配给其他员工，不可重复分配", shopID)
+		callerSet := make(map[uint64]bool, len(callerShops))
+		for _, id := range callerShops {
+			callerSet[id] = true
+		}
+		for _, sid := range shopIDs {
+			if !callerSet[sid] {
+				return fmt.Errorf("店铺ID %d 不在您的可分配范围内", sid)
+			}
 		}
 	}
+
+	// Per-layer mutual exclusion: check sibling accounts
+	for _, shopID := range shopIDs {
+		taken, ownerID, err := s.shopRepo.IsShopAssignedToSibling(shopID, accountID, account.Role, account.ParentID)
+		if err != nil {
+			return err
+		}
+		if taken {
+			owner, _ := s.accountRepo.GetByID(ownerID)
+			name := fmt.Sprintf("ID=%d", ownerID)
+			if owner != nil {
+				name = owner.RealName
+				if name == "" {
+					name = owner.Username
+				}
+			}
+			return fmt.Errorf("店铺ID %d 已分配给 %s，同级不可重复分配", shopID, name)
+		}
+	}
+
 	return s.shopRepo.ReplaceAccountShops(accountID, shopIDs)
 }
 
