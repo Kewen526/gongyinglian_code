@@ -27,10 +27,24 @@ var platformFallback = map[string]string{
 	"阿里巴巴": "1688",
 }
 
+// DeductCheckResult reports why an order can or cannot be审核'd right now.
+type DeductCheckResult int
+
+const (
+	DeductOK           DeductCheckResult = iota // balance sufficient
+	DeductInsufficient                          // wallet exists but balance too low
+	DeductSkip                                  // no account, no wallet, or price/barcode error
+)
+
+// MarkPusher pushes a batch of mark updates to the ERP (WanLiNiu).
+// Wired from SyncService.BatchMarkOrders at startup.
+type MarkPusher func(items []model.MarkItem) error
+
 type BillingService struct {
 	billingRepo *repository.BillingRepo
 	orderRepo   *repository.OrderRepo
 	productRepo *repository.ProductRepo
+	markPusher  MarkPusher
 	stopCh      chan struct{}
 }
 
@@ -42,6 +56,9 @@ func NewBillingService(billingRepo *repository.BillingRepo, orderRepo *repositor
 		stopCh:      make(chan struct{}),
 	}
 }
+
+// SetMarkPusher injects the ERP mark-push function (breaks circular wiring with SyncService).
+func (s *BillingService) SetMarkPusher(p MarkPusher) { s.markPusher = p }
 
 func (s *BillingService) Stop() { close(s.stopCh) }
 
@@ -204,6 +221,11 @@ func (s *BillingService) TriggerDeductionAsync(trade *model.OrderTrade) {
 
 // ProcessDeduction performs the full deduction for one order.
 // Already-succeeded orders are skipped. Error/insufficient orders are retried (old record overwritten).
+//
+// Mark state flow:
+//   - insufficient → sets mark="余额不足扣款失败" + billing_status=2 (no WanLiNiu push)
+//   - recovery (previous mark was "余额不足扣款失败", now sufficient) → flips mark back
+//     to "已审核" in DB and pushes the mark to WanLiNiu (best-effort)
 func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	// Only skip if already successfully deducted
 	if trade.BillingStatus == model.BillingStatusSuccess {
@@ -240,7 +262,13 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 		}
 	}
 
-	now := time.Now()
+	// Load the authoritative mark from DB so we can detect the recovery case
+	// (mark was "余额不足扣款失败" before this retry).
+	prevMark := trade.Mark
+	if fresh, err := s.orderRepo.GetTradeByUID(trade.UID); err == nil && fresh != nil {
+		prevMark = fresh.Mark
+	}
+
 	rec := &model.BillingRecord{
 		FlowNo:         flowNo,
 		AccountID:      accountID,
@@ -253,7 +281,8 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	}
 
 	if calcErr != nil {
-		// Price/barcode error — record but do not deduct
+		// Price/barcode error — record but do not deduct. Keep mark as-is;
+		// these are investigated manually.
 		rec.Status = "error"
 		rec.ErrorMsg = calcErr.Error()
 		rec.BalanceBefore = wallet.Balance
@@ -278,9 +307,10 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	rec.BalanceBefore = wallet.Balance
 
 	if wallet.Balance < actual {
-		// Balance insufficient: update order status for retry tracking, but do NOT
-		// create a billing record — keeps the customer billing view clean.
-		_ = s.orderRepo.UpdateBillingStatus(trade.UID, model.BillingStatusInsufficient)
+		// Balance insufficient: flip mark to "余额不足扣款失败" and set billing_status.
+		// No billing record is created — keeps the customer billing view clean.
+		// No WanLiNiu push on this path (mark is a frontend-only display for this state).
+		_ = s.orderRepo.SetMarkDeductFailed(trade.UID)
 		return nil
 	}
 
@@ -288,7 +318,6 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	newBalance := math.Round((wallet.Balance-actual)*100) / 100
 	rec.Status = "success"
 	rec.BalanceAfter = newBalance
-	_ = now // suppress unused warning
 
 	txErr := s.billingRepo.DB().Transaction(func(tx *gorm.DB) error {
 		if err := s.billingRepo.CreateBillingRecord(tx, rec); err != nil {
@@ -299,7 +328,54 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	if txErr != nil {
 		return txErr
 	}
-	return s.orderRepo.UpdateBillingStatus(trade.UID, model.BillingStatusSuccess)
+	if err := s.orderRepo.UpdateBillingStatus(trade.UID, model.BillingStatusSuccess); err != nil {
+		return err
+	}
+
+	// Recovery: if this retry succeeded after a prior insufficient-balance state,
+	// flip local mark back to "已审核" and push the mark to WanLiNiu so the ERP
+	// resumes its shipping flow.
+	if prevMark == model.MarkDeductFailed {
+		now := time.Now()
+		if err := s.orderRepo.RecoverMarkToApproved(trade.UID, now); err != nil {
+			log.Printf("[Billing] Recover mark trade=%s: %v\n", trade.TradeNo, err)
+		}
+		if s.markPusher != nil {
+			items := []model.MarkItem{{BillCode: trade.TradeNo, MarkName: model.MarkApproved, Type: 0}}
+			if err := s.markPusher(items); err != nil {
+				log.Printf("[Billing] Recovery push to WanLiNiu trade=%s: %v\n", trade.TradeNo, err)
+			}
+		}
+	}
+	return nil
+}
+
+// CheckDeductible pre-evaluates whether an order can be审核'd right now.
+// Used by the auto-review and manual-mark paths to avoid pushing "已审核" to
+// WanLiNiu when the responsible account cannot cover the deduction.
+func (s *BillingService) CheckDeductible(sysShop, tradeUID, platform string) DeductCheckResult {
+	accountID, err := s.resolveAccountID(sysShop)
+	if err != nil || accountID == 0 {
+		return DeductSkip
+	}
+	wallet, err := s.getOrSkipWallet(accountID)
+	if err != nil || wallet == nil {
+		return DeductSkip
+	}
+	cost, err := s.calculateOrderAmount(tradeUID, platform)
+	if err != nil {
+		// Price/barcode error — not a balance problem; skip审核 entirely so ops can investigate.
+		return DeductSkip
+	}
+	discountRate := wallet.DiscountRate
+	if discountRate == 0 {
+		discountRate = 0.85
+	}
+	actual := math.Round(cost*discountRate*100) / 100
+	if wallet.Balance < actual {
+		return DeductInsufficient
+	}
+	return DeductOK
 }
 
 // calculateOrderAmount computes the total control-price amount for an order's items.
@@ -363,31 +439,6 @@ func (s *BillingService) getOrSkipWallet(accountID uint64) (*model.Wallet, error
 		return nil, nil // no wallet yet, skip
 	}
 	return wallet, err
-}
-
-// CanAutoReview checks whether the employee owning sysShop can afford the given order.
-// Returns (canAfford, ownerAccountID). Returns (false, 0) on any lookup or price error.
-// Called by the auto-review task before marking an order.
-func (s *BillingService) CanAutoReview(sysShop, tradeUID, platform string) (bool, uint64) {
-	accountID, err := s.resolveAccountID(sysShop)
-	if err != nil || accountID == 0 {
-		return false, 0
-	}
-	wallet, err := s.getOrSkipWallet(accountID)
-	if err != nil || wallet == nil {
-		return false, 0
-	}
-	cost, err := s.calculateOrderAmount(tradeUID, platform)
-	if err != nil {
-		// Price/barcode error — skip auto-review for this order; manual review required.
-		return false, 0
-	}
-	discountRate := wallet.DiscountRate
-	if discountRate == 0 {
-		discountRate = 0.85
-	}
-	actual := math.Round(cost*discountRate*100) / 100
-	return wallet.Balance >= actual, accountID
 }
 
 // ---------- Public API methods ----------

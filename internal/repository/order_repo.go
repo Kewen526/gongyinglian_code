@@ -237,25 +237,69 @@ func (r *OrderRepo) ListPendingRefundOrders() ([]model.OrderTrade, error) {
 	return trades, err
 }
 
-// ListPendingBillingOrders returns orders where mark="已审核" and billing_status is pending/error/insufficient.
+// ListPendingBillingOrders returns orders that need a deduction attempt.
+// Includes:
+//   - mark="已审核" with billing_status pending/error/insufficient (original retry path)
+//   - mark="余额不足扣款失败" with billing_status=insufficient (recovery after recharge)
 func (r *OrderRepo) ListPendingBillingOrders() ([]model.OrderTrade, error) {
 	var trades []model.OrderTrade
-	err := r.db.Where("mark = ? AND billing_status IN ?", "已审核",
+	err := r.db.Where(
+		"(mark = ? AND billing_status IN ?) OR (mark = ? AND billing_status = ?)",
+		model.MarkApproved,
 		[]int8{model.BillingStatusPending, model.BillingStatusError, model.BillingStatusInsufficient},
+		model.MarkDeductFailed,
+		model.BillingStatusInsufficient,
 	).Find(&trades).Error
 	return trades, err
 }
 
-// ListAutoReviewCandidates returns paid orders not yet marked as 已审核 for the given sys_shop values.
+// SetMarkDeductFailed atomically sets mark="余额不足扣款失败" and billing_status=Insufficient.
+// Guarded on billing_status != Success so a concurrent successful deduction is never overwritten.
+// Idempotent on orders already in the insufficient state.
+func (r *OrderRepo) SetMarkDeductFailed(uid string) error {
+	return r.db.Model(&model.OrderTrade{}).
+		Where("uid = ? AND billing_status != ?", uid, model.BillingStatusSuccess).
+		Updates(map[string]interface{}{
+			"mark":           model.MarkDeductFailed,
+			"billing_status": model.BillingStatusInsufficient,
+		}).Error
+}
+
+// BatchSetMarkDeductFailed bulk-applies the insufficient-mark transition to multiple orders.
+func (r *OrderRepo) BatchSetMarkDeductFailed(uids []string) error {
+	if len(uids) == 0 {
+		return nil
+	}
+	return r.db.Model(&model.OrderTrade{}).
+		Where("uid IN ? AND billing_status != ?", uids, model.BillingStatusSuccess).
+		Updates(map[string]interface{}{
+			"mark":           model.MarkDeductFailed,
+			"billing_status": model.BillingStatusInsufficient,
+		}).Error
+}
+
+// RecoverMarkToApproved flips an insufficient order back to 已审核 after a successful retry.
+// Sets mark_approved_at only if it wasn't set before (preserves original审核 time when possible).
+func (r *OrderRepo) RecoverMarkToApproved(uid string, approvedAt time.Time) error {
+	return r.db.Model(&model.OrderTrade{}).
+		Where("uid = ? AND mark = ?", uid, model.MarkDeductFailed).
+		Updates(map[string]interface{}{
+			"mark":             model.MarkApproved,
+			"mark_approved_at": approvedAt,
+		}).Error
+}
+
+// ListAutoReviewCandidates returns paid orders eligible for auto-review for the given sys_shop values.
+// Eligible = mark is empty (never audited). Orders already marked "已审核" or "余额不足扣款失败"
+// are excluded — the former are done, the latter are handled by the billing auto-deduct retry task.
 // Capped at 500 per call to bound memory usage and WanLiNiu batch size.
-// Uses existing idx_sys_shop index for the primary filter.
 func (r *OrderRepo) ListAutoReviewCandidates(sysShops []string) ([]model.OrderTrade, error) {
 	if len(sysShops) == 0 {
 		return nil, nil
 	}
 	var trades []model.OrderTrade
 	err := r.db.
-		Where("sys_shop IN ? AND is_pay = ? AND COALESCE(mark, '') != ?", sysShops, true, "已审核").
+		Where("sys_shop IN ? AND is_pay = ? AND COALESCE(mark, '') = ''", sysShops, true).
 		Order("create_time_ms ASC").
 		Limit(500).
 		Find(&trades).Error
@@ -373,7 +417,10 @@ func orderTradeUpdateColumns() []string {
 		"express_code", "logistic_code", "logistic_name", "channel_name",
 		"sum_sale", "post_fee", "paid_fee", "discount_fee", "service_fee",
 		"real_payment", "post_cost", "has_refund", "is_exception_trade",
-		"trade_type", "mark", "flag", "pay_no", "pay_type",
+		"trade_type", "flag", "pay_no", "pay_type",
+		// "mark" intentionally excluded — after initial insert, mark is owned
+		// by our system (set by审核/扣款 flow). WanLiNiu's mark is only taken
+		// at INSERT time, never overwritten on subsequent syncs.
 		"currency_code", "currency_sum", "weight", "volume", "estimate_weight",
 		"tp_logistics_type", "original_no", "original_shop_type",
 		"wave_no", "batch_serial", "gx_origin_trade_id",
