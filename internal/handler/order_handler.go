@@ -113,31 +113,35 @@ func (h *OrderHandler) ListPlatforms(c *gin.Context) {
 	response.Success(c, platforms)
 }
 
-// GET /api/v1/shops/occupied — shop assignment details visible to the caller.
-// Returns both a simple ID list (occupied_shop_ids) and detailed assignments.
+// GET /api/v1/shops/occupied — returns shops occupied by employees (only employees are mutually exclusive).
+// Optional: ?exclude_account_id=X to exclude an employee being edited.
+// Response includes occupied_shop_ids (simple list) and occupied_by (map: shop_id → employee info).
 func (h *OrderHandler) GetOccupiedShopIDs(c *gin.Context) {
-	accountID, _ := c.Get("account_id")
-	role, _ := c.Get("role")
+	var excludeID uint64
+	if s := c.Query("exclude_account_id"); s != "" {
+		excludeID, _ = strconv.ParseUint(s, 10, 64)
+	}
 
-	details, err := h.orderSvc.GetOccupiedShopsDetail(accountID.(uint64), role.(uint8))
+	assignments, err := h.orderSvc.GetEmployeeOccupiedShops(excludeID)
 	if err != nil {
 		response.InternalError(c, "查询失败: "+err.Error())
 		return
 	}
 
-	// Build simple ID set for backward compatibility
-	idSet := make(map[uint64]bool)
-	for _, d := range details {
-		idSet[d.ShopID] = true
-	}
-	ids := make([]uint64, 0, len(idSet))
-	for id := range idSet {
-		ids = append(ids, id)
+	ids := make([]uint64, 0, len(assignments))
+	occupiedBy := make(map[string]gin.H, len(assignments))
+	for _, a := range assignments {
+		ids = append(ids, a.ShopID)
+		occupiedBy[strconv.FormatUint(a.ShopID, 10)] = gin.H{
+			"account_id": a.AccountID,
+			"username":   a.Username,
+			"real_name":  a.RealName,
+		}
 	}
 
 	response.Success(c, gin.H{
 		"occupied_shop_ids": ids,
-		"assignments":       details,
+		"occupied_by":       occupiedBy,
 	})
 }
 
@@ -197,7 +201,8 @@ func (h *OrderHandler) BatchMarkOrders(c *gin.Context) {
 	response.Success(c, result)
 }
 
-// PUT /api/v1/accounts/:id/shops — set account's shop permissions
+// PUT /api/v1/accounts/:id/shops — set account's shop permissions.
+// TeamLead/Supervisor: unrestricted. Employee: mutually exclusive with other employees.
 func (h *OrderHandler) UpdateAccountShops(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -211,15 +216,7 @@ func (h *OrderHandler) UpdateAccountShops(c *gin.Context) {
 		return
 	}
 
-	// Determine caller: super admin passes 0 (no subset check), others pass their own ID.
-	role, _ := c.Get("role")
-	var callerID uint64
-	if role.(uint8) != model.RoleSuperAdmin {
-		aid, _ := c.Get("account_id")
-		callerID = aid.(uint64)
-	}
-
-	if err := h.orderSvc.UpdateAccountShops(id, req.ShopIDs, callerID); err != nil {
+	if err := h.orderSvc.UpdateAccountShops(id, req.ShopIDs); err != nil {
 		response.InternalError(c, "更新失败: "+err.Error())
 		return
 	}

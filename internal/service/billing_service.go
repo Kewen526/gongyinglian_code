@@ -416,7 +416,10 @@ func (s *BillingService) calculateOrderAmount(tradeUID, platform string) (float6
 	return math.Round(total*100) / 100, nil
 }
 
-// resolveAccountID finds the employee account assigned to the given sys_shop.
+// resolveAccountID finds the employee account (role=3) assigned to the given sys_shop.
+// A shop may belong to multiple accounts (team leads, supervisors share freely),
+// but billing deductions always target the employee. Employee mutual exclusion
+// guarantees at most one employee per shop.
 func (s *BillingService) resolveAccountID(sysShop string) (uint64, error) {
 	if sysShop == "" {
 		return 0, nil
@@ -426,7 +429,12 @@ func (s *BillingService) resolveAccountID(sysShop string) (uint64, error) {
 		return 0, nil
 	}
 	var as model.AccountShop
-	if err := s.billingRepo.DB().Where("shop_id = ?", shop.ID).First(&as).Error; err != nil {
+	err := s.billingRepo.DB().Table("account_shop").
+		Select("account_shop.*").
+		Joins("JOIN account ON account.id = account_shop.account_id").
+		Where("account_shop.shop_id = ? AND account.role = ?", shop.ID, model.RoleEmployee).
+		First(&as).Error
+	if err != nil {
 		return 0, nil
 	}
 	return as.AccountID, nil
