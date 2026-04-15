@@ -144,40 +144,10 @@ func (s *OrderService) ListPlatforms() ([]string, error) {
 	return s.shopRepo.ListPlatforms()
 }
 
-// GetOccupiedShopIDs returns shop IDs already assigned to any employee.
-// excludeAccountID > 0 means "ignore this account's own assignments" (for edit mode).
-func (s *OrderService) GetOccupiedShopIDs(excludeAccountID uint64) ([]uint64, error) {
-	ids, err := s.shopRepo.GetOccupiedShopIDs(excludeAccountID)
-	if err != nil {
-		return nil, err
-	}
-	if ids == nil {
-		ids = []uint64{}
-	}
-	return ids, nil
-}
-
-// GetOccupiedShopsDetail returns detailed assignment info for shops visible to the caller.
-// Super admin sees all; others see only shops within their own scope.
-func (s *OrderService) GetOccupiedShopsDetail(callerID uint64, callerRole uint8) ([]repository.ShopAssignment, error) {
-	var scopeShopIDs []uint64
-	if callerRole != model.RoleSuperAdmin {
-		ids, err := s.shopRepo.GetAccountShopIDs(callerID)
-		if err != nil {
-			return nil, err
-		}
-		scopeShopIDs = ids
-	} else {
-		// Super admin: get all shop IDs
-		shops, err := s.shopRepo.ListAll()
-		if err != nil {
-			return nil, err
-		}
-		for _, shop := range shops {
-			scopeShopIDs = append(scopeShopIDs, shop.ID)
-		}
-	}
-	return s.shopRepo.GetOccupiedShopsDetail(scopeShopIDs)
+// GetEmployeeOccupiedShops returns shops assigned to employees, with owner info.
+// excludeAccountID > 0 means "exclude this employee" (for edit mode).
+func (s *OrderService) GetEmployeeOccupiedShops(excludeAccountID uint64) ([]repository.EmployeeShopAssignment, error) {
+	return s.shopRepo.GetEmployeeOccupiedShops(excludeAccountID)
 }
 
 // GetAccountShops returns the shop IDs assigned to an account.
@@ -186,48 +156,32 @@ func (s *OrderService) GetAccountShops(accountID uint64) ([]uint64, error) {
 }
 
 // UpdateAccountShops replaces shop assignments for an account.
-// All roles (team lead / supervisor / employee) may have shops assigned.
-// Per-layer mutual exclusion: among siblings (same parent + same role), shops
-// cannot overlap. callerID=0 means super admin (no subset check).
-func (s *OrderService) UpdateAccountShops(accountID uint64, shopIDs []uint64, callerID uint64) error {
+// TeamLead / Supervisor: no restrictions, can be assigned any shops.
+// Employee: mutual exclusion — each shop can belong to at most one employee.
+func (s *OrderService) UpdateAccountShops(accountID uint64, shopIDs []uint64) error {
 	account, err := s.accountRepo.GetByID(accountID)
 	if err != nil {
 		return errors.New("账号不存在")
 	}
 
-	// If caller is not super admin, shops must be a subset of caller's own shops.
-	if callerID > 0 {
-		callerShops, err := s.shopRepo.GetAccountShopIDs(callerID)
-		if err != nil {
-			return err
-		}
-		callerSet := make(map[uint64]bool, len(callerShops))
-		for _, id := range callerShops {
-			callerSet[id] = true
-		}
-		for _, sid := range shopIDs {
-			if !callerSet[sid] {
-				return fmt.Errorf("店铺ID %d 不在您的可分配范围内", sid)
+	// Only employees have mutual exclusion
+	if account.Role == model.RoleEmployee {
+		for _, shopID := range shopIDs {
+			taken, ownerID, err := s.shopRepo.IsShopAssignedToOtherEmployee(shopID, accountID)
+			if err != nil {
+				return err
 			}
-		}
-	}
-
-	// Per-layer mutual exclusion: check sibling accounts
-	for _, shopID := range shopIDs {
-		taken, ownerID, err := s.shopRepo.IsShopAssignedToSibling(shopID, accountID, account.Role, account.ParentID)
-		if err != nil {
-			return err
-		}
-		if taken {
-			owner, _ := s.accountRepo.GetByID(ownerID)
-			name := fmt.Sprintf("ID=%d", ownerID)
-			if owner != nil {
-				name = owner.RealName
-				if name == "" {
-					name = owner.Username
+			if taken {
+				owner, _ := s.accountRepo.GetByID(ownerID)
+				name := fmt.Sprintf("ID=%d", ownerID)
+				if owner != nil {
+					name = owner.RealName
+					if name == "" {
+						name = owner.Username
+					}
 				}
+				return fmt.Errorf("店铺ID %d 已分配给员工 %s，员工之间不可重复分配", shopID, name)
 			}
-			return fmt.Errorf("店铺ID %d 已分配给 %s，同级不可重复分配", shopID, name)
 		}
 	}
 

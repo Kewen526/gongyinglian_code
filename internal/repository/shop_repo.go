@@ -60,82 +60,50 @@ func (r *ShopRepo) GetAccountShopIDs(accountID uint64) ([]uint64, error) {
 	return shopIDs, err
 }
 
-// GetOccupiedShopIDs returns all shop IDs currently assigned to any account,
-// optionally excluding one account (used when editing an existing account's shops).
-func (r *ShopRepo) GetOccupiedShopIDs(excludeAccountID uint64) ([]uint64, error) {
-	var shopIDs []uint64
-	q := r.db.Model(&model.AccountShop{})
-	if excludeAccountID > 0 {
-		q = q.Where("account_id != ?", excludeAccountID)
-	}
-	err := q.Pluck("shop_id", &shopIDs).Error
-	return shopIDs, err
-}
-
-// IsShopAssignedToSibling checks per-layer mutual exclusion.
-// "Siblings" = accounts that share the same parent_id AND the same role,
-// excluding the target account itself.
-// For team leads (parent_id IS NULL), siblings are all other team leads.
-func (r *ShopRepo) IsShopAssignedToSibling(shopID uint64, targetAccountID uint64, targetRole uint8, targetParentID *uint64) (bool, uint64, error) {
-	// Find sibling account IDs (same role, same parent, excluding self)
-	siblingQ := r.db.Model(&model.Account{}).
-		Where("role = ? AND id != ?", targetRole, targetAccountID)
-	if targetParentID != nil {
-		siblingQ = siblingQ.Where("parent_id = ?", *targetParentID)
-	} else {
-		siblingQ = siblingQ.Where("parent_id IS NULL")
-	}
-
-	var siblingIDs []uint64
-	if err := siblingQ.Pluck("id", &siblingIDs).Error; err != nil {
-		return false, 0, err
-	}
-	if len(siblingIDs) == 0 {
-		return false, 0, nil
-	}
-
-	// Check if any sibling has this shop
+// IsShopAssignedToOtherEmployee checks if a shop is already assigned to
+// another employee (role=3). Only employee-to-employee mutual exclusion exists;
+// team leads and supervisors are free to share any shop.
+func (r *ShopRepo) IsShopAssignedToOtherEmployee(shopID uint64, excludeAccountID uint64) (bool, uint64, error) {
 	var as model.AccountShop
-	err := r.db.Where("shop_id = ? AND account_id IN ?", shopID, siblingIDs).First(&as).Error
+	err := r.db.Table("account_shop").
+		Select("account_shop.*").
+		Joins("JOIN account ON account.id = account_shop.account_id").
+		Where("account_shop.shop_id = ? AND account.role = ? AND account_shop.account_id != ?",
+			shopID, model.RoleEmployee, excludeAccountID).
+		First(&as).Error
 	if err != nil {
-		return false, 0, nil // not found
+		return false, 0, nil // not found or error → treat as available
 	}
 	return true, as.AccountID, nil
 }
 
-// GetOccupiedShopsDetail returns shop assignment details for display.
-// Each shop that is assigned to any account is returned with the account info.
-type ShopAssignment struct {
+// EmployeeShopAssignment holds a shop-to-employee mapping for the occupied-shops API.
+type EmployeeShopAssignment struct {
 	ShopID    uint64 `json:"shop_id"`
 	AccountID uint64 `json:"account_id"`
 	Username  string `json:"username"`
 	RealName  string `json:"real_name"`
-	Role      uint8  `json:"role"`
 }
 
-func (r *ShopRepo) GetOccupiedShopsDetail(scopeShopIDs []uint64) ([]ShopAssignment, error) {
-	if len(scopeShopIDs) == 0 {
-		return []ShopAssignment{}, nil
-	}
-	var results []ShopAssignment
-	err := r.db.Table("account_shop").
-		Select("account_shop.shop_id, account_shop.account_id, account.username, account.real_name, account.role").
+// GetEmployeeOccupiedShops returns all shop assignments that belong to employees (role=3).
+// excludeAccountID > 0 means "exclude this employee's own assignments" (edit mode).
+func (r *ShopRepo) GetEmployeeOccupiedShops(excludeAccountID uint64) ([]EmployeeShopAssignment, error) {
+	q := r.db.Table("account_shop").
+		Select("account_shop.shop_id, account_shop.account_id, account.username, account.real_name").
 		Joins("JOIN account ON account.id = account_shop.account_id").
-		Where("account_shop.shop_id IN ?", scopeShopIDs).
-		Scan(&results).Error
-	return results, err
-}
-
-// GetShopIDsByAccountIDs returns all shop IDs assigned to any of the given account IDs.
-func (r *ShopRepo) GetShopIDsByAccountIDs(accountIDs []uint64) ([]uint64, error) {
-	if len(accountIDs) == 0 {
-		return []uint64{}, nil
+		Where("account.role = ?", model.RoleEmployee)
+	if excludeAccountID > 0 {
+		q = q.Where("account_shop.account_id != ?", excludeAccountID)
 	}
-	var shopIDs []uint64
-	err := r.db.Model(&model.AccountShop{}).
-		Where("account_id IN ?", accountIDs).
-		Pluck("shop_id", &shopIDs).Error
-	return shopIDs, err
+	var results []EmployeeShopAssignment
+	err := q.Scan(&results).Error
+	if err != nil {
+		return nil, err
+	}
+	if results == nil {
+		results = []EmployeeShopAssignment{}
+	}
+	return results, nil
 }
 
 // GetSysShopsByIDs returns the sys_shop strings for the given shop IDs.
