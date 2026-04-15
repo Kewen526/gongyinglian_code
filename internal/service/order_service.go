@@ -166,6 +166,17 @@ func (s *OrderService) UpdateAccountShops(accountID uint64, shopIDs []uint64) er
 
 	// Only employees have mutual exclusion
 	if account.Role == model.RoleEmployee {
+		// Pre-fetch shop names for error messages
+		var shopMap map[uint64]model.Shop
+		if len(shopIDs) > 0 {
+			shops, err := s.shopRepo.GetByIDs(shopIDs)
+			if err == nil {
+				shopMap = make(map[uint64]model.Shop, len(shops))
+				for _, sh := range shops {
+					shopMap[sh.ID] = sh
+				}
+			}
+		}
 		for _, shopID := range shopIDs {
 			taken, ownerID, err := s.shopRepo.IsShopAssignedToOtherEmployee(shopID, accountID)
 			if err != nil {
@@ -173,14 +184,21 @@ func (s *OrderService) UpdateAccountShops(accountID uint64, shopIDs []uint64) er
 			}
 			if taken {
 				owner, _ := s.accountRepo.GetByID(ownerID)
-				name := fmt.Sprintf("ID=%d", ownerID)
+				ownerName := fmt.Sprintf("ID=%d", ownerID)
 				if owner != nil {
-					name = owner.RealName
-					if name == "" {
-						name = owner.Username
+					ownerName = owner.RealName
+					if ownerName == "" {
+						ownerName = owner.Username
 					}
 				}
-				return fmt.Errorf("店铺ID %d 已分配给员工 %s，员工之间不可重复分配", shopID, name)
+				shopName := fmt.Sprintf("ID=%d", shopID)
+				if sh, ok := shopMap[shopID]; ok {
+					shopName = sh.ShopName
+					if shopName == "" {
+						shopName = sh.SysShop
+					}
+				}
+				return fmt.Errorf("店铺 %s 已分配给员工 %s，员工之间不可重复分配", shopName, ownerName)
 			}
 		}
 	}
