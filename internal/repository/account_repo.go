@@ -139,29 +139,35 @@ func (r *AccountRepo) GetProductScope(accountID uint64) (*model.AccountProductSc
 }
 
 // SaveProductScope upserts the product scope for an account.
-func (r *AccountRepo) SaveProductScope(accountID uint64, suppliers, tags []string) error {
+func (r *AccountRepo) SaveProductScope(accountID uint64, suppliers, tags, hiddenFields []string) error {
 	s := model.StringSlice(suppliers)
 	t := model.StringSlice(tags)
+	h := model.StringSlice(hiddenFields)
 	if s == nil {
 		s = model.StringSlice{}
 	}
 	if t == nil {
 		t = model.StringSlice{}
 	}
+	if h == nil {
+		h = model.StringSlice{}
+	}
 	var existing model.AccountProductScope
 	err := r.db.Where("account_id = ?", accountID).First(&existing).Error
 	if err != nil {
 		// Create new record
 		return r.db.Create(&model.AccountProductScope{
-			AccountID: accountID,
-			Suppliers: s,
-			Tags:      t,
+			AccountID:    accountID,
+			Suppliers:    s,
+			Tags:         t,
+			HiddenFields: h,
 		}).Error
 	}
 	// Update existing
 	return r.db.Model(&existing).Updates(map[string]interface{}{
-		"suppliers": s,
-		"tags":      t,
+		"suppliers":     s,
+		"tags":          t,
+		"hidden_fields": h,
 	}).Error
 }
 

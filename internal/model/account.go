@@ -110,24 +110,27 @@ type AccountListResp struct {
 // AccountProductScope stores which suppliers and tags an employee can see.
 // Only applies to RoleEmployee accounts that have product module permission.
 type AccountProductScope struct {
-	ID        uint64      `json:"id" gorm:"primaryKey;autoIncrement"`
-	AccountID uint64      `json:"account_id" gorm:"not null;uniqueIndex"`
-	Suppliers StringSlice `json:"suppliers" gorm:"type:json"`
-	Tags      StringSlice `json:"tags" gorm:"type:json"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	ID           uint64      `json:"id" gorm:"primaryKey;autoIncrement"`
+	AccountID    uint64      `json:"account_id" gorm:"not null;uniqueIndex"`
+	Suppliers    StringSlice `json:"suppliers" gorm:"type:json"`
+	Tags         StringSlice `json:"tags" gorm:"type:json"`
+	HiddenFields StringSlice `json:"hidden_fields" gorm:"column:hidden_fields;type:json"`
+	CreatedAt    time.Time   `json:"created_at"`
+	UpdatedAt    time.Time   `json:"updated_at"`
 }
 
 func (AccountProductScope) TableName() string { return "account_product_scope" }
 
 type ProductScopeReq struct {
-	Suppliers []string `json:"suppliers"`
-	Tags      []string `json:"tags"`
+	Suppliers    []string `json:"suppliers"`
+	Tags         []string `json:"tags"`
+	HiddenFields []string `json:"hidden_fields"`
 }
 
 type ProductScopeResp struct {
-	Suppliers []string `json:"suppliers"`
-	Tags      []string `json:"tags"`
+	Suppliers    []string `json:"suppliers"`
+	Tags         []string `json:"tags"`
+	HiddenFields []string `json:"hidden_fields"`
 }
 
 // ---------- Auto Review ----------

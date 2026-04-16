@@ -416,17 +416,21 @@ func (s *AccountService) DeleteAccount(id uint64, callerID uint64, callerRole ui
 func (s *AccountService) GetProductScope(accountID uint64) (*model.ProductScopeResp, error) {
 	scope, err := s.repo.GetProductScope(accountID)
 	if err != nil {
-		return &model.ProductScopeResp{Suppliers: []string{}, Tags: []string{}}, nil
+		return &model.ProductScopeResp{Suppliers: []string{}, Tags: []string{}, HiddenFields: []string{}}, nil
 	}
 	suppliers := []string(scope.Suppliers)
 	tags := []string(scope.Tags)
+	hiddenFields := []string(scope.HiddenFields)
 	if suppliers == nil {
 		suppliers = []string{}
 	}
 	if tags == nil {
 		tags = []string{}
 	}
-	return &model.ProductScopeResp{Suppliers: suppliers, Tags: tags}, nil
+	if hiddenFields == nil {
+		hiddenFields = []string{}
+	}
+	return &model.ProductScopeResp{Suppliers: suppliers, Tags: tags, HiddenFields: hiddenFields}, nil
 }
 
 // SaveProductScope upserts the product scope with hierarchy and subset validation.
@@ -436,6 +440,13 @@ func (s *AccountService) SaveProductScope(accountID uint64, req *model.ProductSc
 		return err
 	}
 
+	// Validate hidden_fields entries are in whitelist
+	for _, f := range req.HiddenFields {
+		if !model.IsValidHiddenField(f) {
+			return fmt.Errorf("无效的隐藏字段: %s", f)
+		}
+	}
+
 	// For non-super-admin, validate scope is subset of caller's own scope
 	if callerRole != model.RoleSuperAdmin {
 		if err := s.validateScopeSubset(callerID, req.Suppliers, req.Tags); err != nil {
@@ -443,7 +454,7 @@ func (s *AccountService) SaveProductScope(accountID uint64, req *model.ProductSc
 		}
 	}
 
-	return s.repo.SaveProductScope(accountID, req.Suppliers, req.Tags)
+	return s.repo.SaveProductScope(accountID, req.Suppliers, req.Tags, req.HiddenFields)
 }
 
 // validateScopeSubset ensures the suppliers/tags are a subset of the caller's own scope.
