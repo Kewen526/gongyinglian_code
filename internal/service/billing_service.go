@@ -33,7 +33,8 @@ type DeductCheckResult int
 const (
 	DeductOK           DeductCheckResult = iota // balance sufficient
 	DeductInsufficient                          // wallet exists but balance too low
-	DeductSkip                                  // no account, no wallet, or price/barcode error
+	DeductSkip                                  // no account, no wallet, etc.
+	DeductBarcodeError                          // barcode not found or no control price
 )
 
 // MarkPusher pushes a batch of mark updates to the ERP (WanLiNiu).
@@ -364,8 +365,7 @@ func (s *BillingService) CheckDeductible(sysShop, tradeUID, platform string) Ded
 	}
 	cost, err := s.calculateOrderAmount(tradeUID, platform)
 	if err != nil {
-		// Price/barcode error — not a balance problem; skip审核 entirely so ops can investigate.
-		return DeductSkip
+		return DeductBarcodeError
 	}
 	discountRate := wallet.DiscountRate
 	if discountRate == 0 {

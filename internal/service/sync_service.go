@@ -906,6 +906,7 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 	}
 	approved := make([]approvedItem, 0, len(candidates))
 	insufficientUIDs := make([]string, 0)
+	barcodeErrorUIDs := make([]string, 0)
 	for i := range candidates {
 		t := &candidates[i]
 		switch s.billingService.CheckDeductible(t.SysShop, t.UID, t.SourcePlatform) {
@@ -916,6 +917,8 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 			})
 		case DeductInsufficient:
 			insufficientUIDs = append(insufficientUIDs, t.UID)
+		case DeductBarcodeError:
+			barcodeErrorUIDs = append(barcodeErrorUIDs, t.UID)
 		}
 	}
 	if len(insufficientUIDs) > 0 {
@@ -923,6 +926,13 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 			log.Printf("[AutoReview] BatchSetMarkDeductFailed account=%d: %v\n", account.ID, err)
 		} else {
 			log.Printf("[AutoReview] Account=%d marked %d orders as 余额不足扣款失败\n", account.ID, len(insufficientUIDs))
+		}
+	}
+	if len(barcodeErrorUIDs) > 0 {
+		if err := s.orderRepo.BatchSetMarkBarcodeError(barcodeErrorUIDs); err != nil {
+			log.Printf("[AutoReview] BatchSetMarkBarcodeError account=%d: %v\n", account.ID, err)
+		} else {
+			log.Printf("[AutoReview] Account=%d marked %d orders as 审核失败货号错误\n", account.ID, len(barcodeErrorUIDs))
 		}
 	}
 	if len(approved) == 0 {

@@ -278,6 +278,19 @@ func (r *OrderRepo) BatchSetMarkDeductFailed(uids []string) error {
 		}).Error
 }
 
+// BatchSetMarkBarcodeError bulk-marks orders as "审核失败货号错误".
+// These orders will be retried by auto-review once the product/price is added.
+func (r *OrderRepo) BatchSetMarkBarcodeError(uids []string) error {
+	if len(uids) == 0 {
+		return nil
+	}
+	return r.db.Model(&model.OrderTrade{}).
+		Where("uid IN ? AND billing_status != ?", uids, model.BillingStatusSuccess).
+		Updates(map[string]interface{}{
+			"mark": model.MarkBarcodeError,
+		}).Error
+}
+
 // RecoverMarkToApproved flips an insufficient order back to 已审核 after a successful retry.
 // Sets mark_approved_at only if it wasn't set before (preserves original审核 time when possible).
 func (r *OrderRepo) RecoverMarkToApproved(uid string, approvedAt time.Time) error {
@@ -290,8 +303,8 @@ func (r *OrderRepo) RecoverMarkToApproved(uid string, approvedAt time.Time) erro
 }
 
 // ListAutoReviewCandidates returns paid orders eligible for auto-review for the given sys_shop values.
-// Eligible = mark is empty (never audited). Orders already marked "已审核" or "余额不足扣款失败"
-// are excluded — the former are done, the latter are handled by the billing auto-deduct retry task.
+// Eligible = mark is empty (never audited) OR mark is "审核失败货号错误" (retry after product added).
+// Orders marked "已审核" or "余额不足扣款失败" are excluded.
 // Capped at 500 per call to bound memory usage and WanLiNiu batch size.
 func (r *OrderRepo) ListAutoReviewCandidates(sysShops []string) ([]model.OrderTrade, error) {
 	if len(sysShops) == 0 {
@@ -299,7 +312,7 @@ func (r *OrderRepo) ListAutoReviewCandidates(sysShops []string) ([]model.OrderTr
 	}
 	var trades []model.OrderTrade
 	err := r.db.
-		Where("sys_shop IN ? AND is_pay = ? AND COALESCE(mark, '') = ''", sysShops, true).
+		Where("sys_shop IN ? AND is_pay = ? AND (COALESCE(mark, '') = '' OR mark = ?)", sysShops, true, model.MarkBarcodeError).
 		Order("create_time_ms ASC").
 		Limit(500).
 		Find(&trades).Error
