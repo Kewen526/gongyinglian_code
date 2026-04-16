@@ -133,6 +133,7 @@ type OrderTrade struct {
 	PlatformDiscountJSON  string     `json:"-" gorm:"type:text;comment:平台优惠信息JSON"`
 	MarkApprovedAt        *time.Time `json:"mark_approved_at" gorm:"type:datetime;index;comment:mark变为已审核的时间"`
 	BillingStatus         int8       `json:"billing_status" gorm:"type:tinyint;default:0;index;index:idx_refund_scan,priority:2;comment:0未扣款1成功2余额不足3错误4已退款"`
+	WarehouseStatus       int8       `json:"warehouse_status" gorm:"type:tinyint;default:0;index:idx_warehouse_scan;comment:云仓扣款0未扣1成功2余额不足"`
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             time.Time  `json:"updated_at"`
 
