@@ -71,6 +71,9 @@ func main() {
 		&model.ProductDetailImage{},
 		&model.ProductVideo{},
 		&model.AccountProductScope{},
+		&model.WarehouseWallet{},
+		&model.WarehouseRechargeRequest{},
+		&model.WarehouseBillingRecord{},
 	); err != nil {
 		log.Fatalf("Failed to auto-migrate tables: %v", err)
 	}
@@ -125,6 +128,12 @@ func main() {
 	defer billingService.Stop()
 	log.Println("[Billing] Billing service started")
 
+	warehouseRepo := repository.NewWarehouseRepo(db)
+	warehouseService := service.NewWarehouseService(warehouseRepo)
+	warehouseService.StartAutoDeduct()
+	defer warehouseService.Stop()
+	log.Println("[Warehouse] Warehouse billing service started")
+
 	// ---------- Handler Layer ----------
 	accountHandler := handler.NewAccountHandler(accountService)
 	productHandler := handler.NewProductHandler(productService)
@@ -132,9 +141,11 @@ func main() {
 	orderHandler := handler.NewOrderHandler(orderService, syncService)
 	billingHandler := handler.NewBillingHandler(billingService)
 	adminBillingHandler := handler.NewAdminBillingHandler(billingService)
+	warehouseHandler := handler.NewWarehouseHandler(warehouseService)
+	adminWarehouseHandler := handler.NewAdminWarehouseHandler(warehouseService)
 
 	// ---------- Router ----------
-	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, orderHandler, billingHandler, adminBillingHandler, accountRepo)
+	r := router.SetupRouter(accountHandler, productHandler, uploadHandler, orderHandler, billingHandler, adminBillingHandler, warehouseHandler, adminWarehouseHandler, accountRepo)
 
 	// ---------- Start Server ----------
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
@@ -150,6 +161,7 @@ func initModules(db *gorm.DB) {
 		{Name: "产品管理", Code: "product"},
 		{Name: "订单管理", Code: "order"},
 		{Name: "财务流水", Code: "billing"},
+		{Name: "仓储发货", Code: "warehouse"},
 	}
 	for _, m := range modules {
 		var count int64

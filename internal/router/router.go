@@ -15,6 +15,8 @@ func SetupRouter(
 	orderHandler *handler.OrderHandler,
 	billingHandler *handler.BillingHandler,
 	adminBillingHandler *handler.AdminBillingHandler,
+	warehouseHandler *handler.WarehouseHandler,
+	adminWarehouseHandler *handler.AdminWarehouseHandler,
 	accountRepo *repository.AccountRepo,
 ) *gin.Engine {
 	r := gin.Default()
@@ -138,6 +140,16 @@ func SetupRouter(
 		billingGroup.GET("/billing/recharge-records", billingHandler.ListMyRechargeRecords)
 	}
 
+	// --- Warehouse billing (employees, warehouse module permission) ---
+	warehouseGroup := auth.Group("")
+	warehouseGroup.Use(middleware.RequireModulePermission(accountRepo, "warehouse", false))
+	{
+		warehouseGroup.GET("/warehouse/wallet", warehouseHandler.GetWallet)
+		warehouseGroup.GET("/warehouse/billing", warehouseHandler.ListBillingRecords)
+		warehouseGroup.POST("/warehouse/recharge", warehouseHandler.SubmitRecharge)
+		warehouseGroup.GET("/warehouse/recharge-records", warehouseHandler.ListMyRechargeRecords)
+	}
+
 	// --- Admin Finance Center (super admin only) ---
 	adminFinance := auth.Group("/admin/finance")
 	adminFinance.Use(middleware.RequireSuperAdmin())
@@ -148,6 +160,17 @@ func SetupRouter(
 		adminFinance.POST("/recharge-requests/:id/reject", adminBillingHandler.RejectRecharge)
 		adminFinance.GET("/billing-records", adminBillingHandler.ListAllBillingRecords)
 		adminFinance.GET("/billing-records/export", adminBillingHandler.ExportBillingRecords)
+	}
+
+	// --- Admin Warehouse Finance (super admin only) ---
+	adminWarehouse := auth.Group("/admin/warehouse")
+	adminWarehouse.Use(middleware.RequireSuperAdmin())
+	{
+		adminWarehouse.GET("/overview", adminWarehouseHandler.GetOverview)
+		adminWarehouse.GET("/recharge-requests", adminWarehouseHandler.ListRechargeRequests)
+		adminWarehouse.POST("/recharge-requests/:id/approve", adminWarehouseHandler.ApproveRecharge)
+		adminWarehouse.POST("/recharge-requests/:id/reject", adminWarehouseHandler.RejectRecharge)
+		adminWarehouse.GET("/billing-records", adminWarehouseHandler.ListBillingRecords)
 	}
 
 	return r
