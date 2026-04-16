@@ -128,6 +128,52 @@ type ProductVideo struct {
 
 func (ProductVideo) TableName() string { return "product_video" }
 
+// ---------- Hidden Field Options ----------
+
+// HiddenFieldOptions defines which product fields can be hidden per account.
+// Key = JSON field name, Value = Chinese display label.
+var HiddenFieldOptions = map[string]string{
+	// Main table columns
+	"image_url":      "产品图片",
+	"brand":          "品牌",
+	"category":       "类目",
+	"material":       "材质",
+	"patent_status":  "专利状态",
+	"factory_price":  "出厂价",
+	// Sub-resources (hidden as a whole block)
+	"specs":           "规格信息",
+	"platform_prices": "平台控价",
+	"skus":            "SKU信息",
+	"detail_images":   "详情图",
+	"videos":          "视频",
+}
+
+// FieldOption is a DTO for the field-options API.
+type FieldOption struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
+
+// GetFieldOptions returns the hideable field list for the frontend dropdown.
+func GetFieldOptions() []FieldOption {
+	// Fixed order for consistent frontend display
+	keys := []string{
+		"image_url", "brand", "category", "material", "patent_status", "factory_price",
+		"specs", "platform_prices", "skus", "detail_images", "videos",
+	}
+	opts := make([]FieldOption, 0, len(keys))
+	for _, k := range keys {
+		opts = append(opts, FieldOption{Key: k, Label: HiddenFieldOptions[k]})
+	}
+	return opts
+}
+
+// IsValidHiddenField checks if a key is in the hideable whitelist.
+func IsValidHiddenField(key string) bool {
+	_, ok := HiddenFieldOptions[key]
+	return ok
+}
+
 // ---------- Request / Response DTOs ----------
 
 type CreateProductReq struct {
@@ -188,10 +234,10 @@ type ProductListReq struct {
 }
 
 type ProductListResp struct {
-	List            []Product `json:"list"`
-	Total           int64     `json:"total"`
-	SearchAfterCode string    `json:"search_after_code,omitempty"`
-	SearchAfterID   string    `json:"search_after_id,omitempty"`
+	List            interface{} `json:"list"`
+	Total           int64       `json:"total"`
+	SearchAfterCode string      `json:"search_after_code,omitempty"`
+	SearchAfterID   string      `json:"search_after_id,omitempty"`
 }
 
 type ProductDetailResp struct {

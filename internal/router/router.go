@@ -64,6 +64,7 @@ func SetupRouter(
 		productView.GET("/products", productHandler.ListProducts)
 		productView.GET("/products/:id", productHandler.GetProductDetail)
 		productView.GET("/products/suppliers", productHandler.GetSuppliers)
+		productView.GET("/products/field-options", productHandler.GetFieldOptions)
 	}
 
 	// --- Product: edit permission ---

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"supply-chain/internal/config"
@@ -99,7 +100,7 @@ func (s *ProductService) CreateProduct(req *model.CreateProductReq) (*model.Prod
 	return p, nil
 }
 
-func (s *ProductService) GetProductDetail(id uint64) (*model.ProductDetailResp, error) {
+func (s *ProductService) GetProductDetail(id uint64, accountID uint64, role uint8) (interface{}, error) {
 	p, err := s.repo.GetByID(id)
 	if err != nil {
 		return nil, err
@@ -111,14 +112,20 @@ func (s *ProductService) GetProductDetail(id uint64) (*model.ProductDetailResp, 
 	images, _ := s.repo.GetDetailImagesByProductID(id)
 	videos, _ := s.repo.GetVideosByProductID(id)
 
-	return &model.ProductDetailResp{
+	detail := &model.ProductDetailResp{
 		Product:        *p,
 		Specs:          specs,
 		PlatformPrices: prices,
 		SKUs:           skus,
 		DetailImages:   images,
 		Videos:         videos,
-	}, nil
+	}
+
+	hidden := s.getHiddenFields(accountID, role)
+	if hidden != nil {
+		return maskDetail(detail, hidden), nil
+	}
+	return detail, nil
 }
 
 func (s *ProductService) UpdateProduct(id uint64, req *model.UpdateProductReq) error {
@@ -294,8 +301,15 @@ func (s *ProductService) ListProducts(req *model.ProductListReq, accountID uint6
 		return nil, err
 	}
 
+	// Apply field masking for non-super-admin
+	hidden := s.getHiddenFields(accountID, role)
+	var list interface{} = products
+	if hidden != nil {
+		list = maskProducts(products, hidden)
+	}
+
 	resp := &model.ProductListResp{
-		List:  products,
+		List:  list,
 		Total: searchResult.Total,
 	}
 
@@ -310,6 +324,72 @@ func (s *ProductService) ListProducts(req *model.ProductListReq, accountID uint6
 // GetDistinctSuppliers returns all unique supplier values from the product table.
 func (s *ProductService) GetDistinctSuppliers() ([]string, error) {
 	return s.repo.GetDistinctSuppliers()
+}
+
+// GetFieldOptions returns the available hideable field options.
+func (s *ProductService) GetFieldOptions() []model.FieldOption {
+	return model.GetFieldOptions()
+}
+
+// getHiddenFields returns the hidden fields set for a non-super-admin account.
+func (s *ProductService) getHiddenFields(accountID uint64, role uint8) map[string]bool {
+	if role == model.RoleSuperAdmin || accountID == 0 || s.accountRepo == nil {
+		return nil
+	}
+	scope, err := s.accountRepo.GetProductScope(accountID)
+	if err != nil || scope == nil || len(scope.HiddenFields) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(scope.HiddenFields))
+	for _, f := range scope.HiddenFields {
+		set[f] = true
+	}
+	return set
+}
+
+// maskProduct strips hidden fields from a Product, returns a map.
+func maskProduct(p model.Product, hidden map[string]bool) map[string]any {
+	data, _ := json.Marshal(p)
+	var m map[string]any
+	_ = json.Unmarshal(data, &m)
+	for key := range hidden {
+		delete(m, key)
+	}
+	return m
+}
+
+// maskProducts masks a slice of products.
+func maskProducts(products []model.Product, hidden map[string]bool) []map[string]any {
+	result := make([]map[string]any, 0, len(products))
+	for _, p := range products {
+		result = append(result, maskProduct(p, hidden))
+	}
+	return result
+}
+
+// maskDetail strips hidden fields from a ProductDetailResp, returns a map.
+func maskDetail(d *model.ProductDetailResp, hidden map[string]bool) map[string]any {
+	// Marshal the entire detail resp
+	data, _ := json.Marshal(d)
+	var m map[string]any
+	_ = json.Unmarshal(data, &m)
+
+	// The "product" key is a nested object; strip hidden main-table fields from it.
+	if productMap, ok := m["product"].(map[string]any); ok {
+		for key := range hidden {
+			delete(productMap, key)
+		}
+	}
+
+	// Sub-resource keys live at the top level of the detail resp.
+	subResources := []string{"specs", "platform_prices", "skus", "detail_images", "videos"}
+	for _, key := range subResources {
+		if hidden[key] {
+			delete(m, key)
+		}
+	}
+
+	return m
 }
 
 // ---------- Spec ----------

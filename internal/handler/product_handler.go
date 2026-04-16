@@ -49,7 +49,18 @@ func (h *ProductHandler) GetProductDetail(c *gin.Context) {
 	if !ok {
 		return
 	}
-	detail, err := h.svc.GetProductDetail(id)
+	// Extract account info from JWT context for field masking
+	accountID, _ := c.Get("account_id")
+	role, _ := c.Get("role")
+	var aid uint64
+	var r uint8
+	if v, ok := accountID.(uint64); ok {
+		aid = v
+	}
+	if v, ok := role.(uint8); ok {
+		r = v
+	}
+	detail, err := h.svc.GetProductDetail(id, aid, r)
 	if err != nil {
 		response.NotFound(c, "产品不存在")
 		return
@@ -122,6 +133,11 @@ func (h *ProductHandler) GetSuppliers(c *gin.Context) {
 		return
 	}
 	response.Success(c, suppliers)
+}
+
+// GET /api/v1/products/field-options
+func (h *ProductHandler) GetFieldOptions(c *gin.Context) {
+	response.Success(c, h.svc.GetFieldOptions())
 }
 
 // ==================== Spec ====================
