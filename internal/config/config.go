@@ -18,6 +18,7 @@ type Config struct {
 type SecurityConfig struct {
 	AllowedOrigins []string `json:"allowed_origins"`
 	AppToken       string   `json:"app_token"`
+	TokenInterval  int      `json:"token_interval_seconds"`
 	RateLimit      int      `json:"rate_limit_per_second"`
 }
 
@@ -108,6 +109,7 @@ func DefaultConfig() *Config {
 		Security: SecurityConfig{
 			AllowedOrigins: []string{"*"},
 			AppToken:       "",
+			TokenInterval:  300,
 			RateLimit:      20,
 		},
 	}

@@ -1,9 +1,14 @@
 package middleware
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"supply-chain/internal/config"
 	"supply-chain/pkg/response"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -45,20 +50,45 @@ func CORS() gin.HandlerFunc {
 	}
 }
 
+const defaultTokenInterval = 300 // 5 minutes
+
+func generateHMACToken(secret string, bucket int64) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(fmt.Sprintf("%d", bucket)))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 func AppTokenCheck() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := config.GlobalConfig.Security.AppToken
-		if token == "" {
+		secret := config.GlobalConfig.Security.AppToken
+		if secret == "" {
 			c.Next()
 			return
 		}
 
-		if c.GetHeader("X-App-Token") != token {
+		interval := int64(config.GlobalConfig.Security.TokenInterval)
+		if interval <= 0 {
+			interval = defaultTokenInterval
+		}
+
+		clientToken := c.GetHeader("X-App-Token")
+		if clientToken == "" {
 			response.Error(c, 403, "禁止访问")
 			c.Abort()
 			return
 		}
 
-		c.Next()
+		now := time.Now().Unix()
+		currentBucket := now / interval
+
+		// Accept current and previous bucket to handle boundary clock skew
+		if clientToken == generateHMACToken(secret, currentBucket) ||
+			clientToken == generateHMACToken(secret, currentBucket-1) {
+			c.Next()
+			return
+		}
+
+		response.Error(c, 403, "令牌无效或已过期")
+		c.Abort()
 	}
 }
