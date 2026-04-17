@@ -12,6 +12,13 @@ type Config struct {
 	COS           COSConfig           `json:"cos"`
 	JWT           JWTConfig           `json:"jwt"`
 	WanLiNiu      WanLiNiuConfig      `json:"wanliniu"`
+	Security      SecurityConfig      `json:"security"`
+}
+
+type SecurityConfig struct {
+	AllowedOrigins []string `json:"allowed_origins"`
+	AppToken       string   `json:"app_token"`
+	RateLimit      int      `json:"rate_limit_per_second"`
 }
 
 type WanLiNiuConfig struct {
@@ -97,6 +104,11 @@ func DefaultConfig() *Config {
 			Secret:       "0e9798a3ace75d01f488dfeaf3f1c2e2",
 			BaseURL:      "https://open-api.hupun.com/api",
 			SyncInterval: 60,
+		},
+		Security: SecurityConfig{
+			AllowedOrigins: []string{"*"},
+			AppToken:       "",
+			RateLimit:      20,
 		},
 	}
 	GlobalConfig = cfg
