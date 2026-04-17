@@ -1,6 +1,7 @@
 package router
 
 import (
+	"supply-chain/internal/config"
 	"supply-chain/internal/handler"
 	"supply-chain/internal/middleware"
 	"supply-chain/internal/repository"
@@ -23,6 +24,11 @@ func SetupRouter(
 
 	// Set max multipart memory to 200MB for file uploads
 	r.MaxMultipartMemory = 200 << 20
+
+	// Security middleware
+	r.Use(middleware.CORS())
+	r.Use(middleware.AppTokenCheck())
+	r.Use(middleware.GlobalRateLimit(config.GlobalConfig.Security.RateLimit))
 
 	api := r.Group("/api/v1")
 

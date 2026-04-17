@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"sync"
 	"supply-chain/pkg/response"
 	"time"
@@ -9,8 +10,8 @@ import (
 )
 
 type ipRecord struct {
-	count    int
-	resetAt  time.Time
+	count   int
+	resetAt time.Time
 }
 
 var (
@@ -60,6 +61,69 @@ func LoginRateLimit() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
+		c.Next()
+	}
+}
+
+// ---------- Global API rate limiter ----------
+
+type rateBucket struct {
+	tokens   int
+	lastTime time.Time
+}
+
+var (
+	globalBuckets = make(map[string]*rateBucket)
+	globalMu      sync.Mutex
+)
+
+func init() {
+	go func() {
+		for {
+			time.Sleep(time.Minute)
+			globalMu.Lock()
+			now := time.Now()
+			for key, b := range globalBuckets {
+				if now.Sub(b.lastTime) > 2*time.Minute {
+					delete(globalBuckets, key)
+				}
+			}
+			globalMu.Unlock()
+		}
+	}()
+}
+
+func GlobalRateLimit(maxPerSecond int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		key := c.ClientIP()
+		if aid := c.GetUint64("account_id"); aid > 0 {
+			key = fmt.Sprintf("user:%d", aid)
+		}
+
+		globalMu.Lock()
+		b, exists := globalBuckets[key]
+		now := time.Now()
+		if !exists {
+			b = &rateBucket{tokens: maxPerSecond, lastTime: now}
+			globalBuckets[key] = b
+		}
+
+		elapsed := now.Sub(b.lastTime).Seconds()
+		b.tokens += int(elapsed * float64(maxPerSecond))
+		if b.tokens > maxPerSecond*2 {
+			b.tokens = maxPerSecond * 2
+		}
+		b.lastTime = now
+
+		if b.tokens <= 0 {
+			globalMu.Unlock()
+			response.Error(c, 429, "请求过于频繁，请稍后再试")
+			c.Abort()
+			return
+		}
+		b.tokens--
+		globalMu.Unlock()
 
 		c.Next()
 	}
