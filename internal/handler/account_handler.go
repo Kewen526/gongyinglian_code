@@ -21,9 +21,10 @@ func NewAccountHandler(svc *service.AccountService) *AccountHandler {
 
 // getCallerInfo extracts caller account_id and role from gin context.
 func getCallerInfo(c *gin.Context) (uint64, uint8) {
-	aid, _ := c.Get("account_id")
+	aid := c.GetUint64("account_id")
 	r, _ := c.Get("role")
-	return aid.(uint64), r.(uint8)
+	role, _ := r.(uint8)
+	return aid, role
 }
 
 // POST /api/v1/login
@@ -197,8 +198,7 @@ func (h *AccountHandler) SaveProductScope(c *gin.Context) {
 
 // GET /api/v1/orders/auto-review — returns the calling account's auto-review status
 func (h *AccountHandler) GetAutoReviewStatus(c *gin.Context) {
-	accountID, _ := c.Get("account_id")
-	aid, _ := accountID.(uint64)
+	aid := c.GetUint64("account_id")
 
 	enabled, err := h.svc.GetAutoReview(aid)
 	if err != nil {
@@ -210,8 +210,7 @@ func (h *AccountHandler) GetAutoReviewStatus(c *gin.Context) {
 
 // PUT /api/v1/orders/auto-review — toggles the calling account's auto-review switch
 func (h *AccountHandler) SetAutoReviewStatus(c *gin.Context) {
-	accountID, _ := c.Get("account_id")
-	aid, _ := accountID.(uint64)
+	aid := c.GetUint64("account_id")
 
 	var req model.AutoReviewReq
 	if err := c.ShouldBindJSON(&req); err != nil {

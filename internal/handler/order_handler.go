@@ -26,10 +26,11 @@ func (h *OrderHandler) ListOrders(c *gin.Context) {
 		return
 	}
 
-	accountID, _ := c.Get("account_id")
-	role, _ := c.Get("role")
+	accountID := c.GetUint64("account_id")
+	r, _ := c.Get("role")
+	role, _ := r.(uint8)
 
-	result, err := h.orderSvc.ListOrders(&req, accountID.(uint64), role.(uint8))
+	result, err := h.orderSvc.ListOrders(&req, accountID, role)
 	if err != nil {
 		response.InternalError(c, "查询订单失败: "+err.Error())
 		return
@@ -46,10 +47,11 @@ func (h *OrderHandler) GetOrderDetail(c *gin.Context) {
 		return
 	}
 
-	accountID, _ := c.Get("account_id")
-	role, _ := c.Get("role")
+	accountID := c.GetUint64("account_id")
+	r, _ := c.Get("role")
+	role, _ := r.(uint8)
 
-	trade, err := h.orderSvc.GetOrderDetail(id, accountID.(uint64), role.(uint8))
+	trade, err := h.orderSvc.GetOrderDetail(id, accountID, role)
 	if err != nil {
 		response.NotFound(c, "订单不存在")
 		return

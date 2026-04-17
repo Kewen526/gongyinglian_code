@@ -90,7 +90,8 @@ func RequireSuperAdmin() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		if role.(uint8) != model.RoleSuperAdmin {
+		r, _ := role.(uint8)
+		if r != model.RoleSuperAdmin {
 			response.Forbidden(c, "仅超级管理员可执行此操作")
 			c.Abort()
 			return
@@ -109,7 +110,7 @@ func RequireAccountManager() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		r := role.(uint8)
+		r, _ := role.(uint8)
 		if r != model.RoleSuperAdmin && r != model.RoleTeamLead && r != model.RoleSupervisor {
 			response.Forbidden(c, "无账号管理权限")
 			c.Abort()
@@ -126,15 +127,16 @@ func RequireModulePermission(accountRepo *repository.AccountRepo, moduleCode str
 	return func(c *gin.Context) {
 		role, _ := c.Get("role")
 		// Super admin bypasses all permission checks
-		if role.(uint8) == model.RoleSuperAdmin {
+		r, _ := role.(uint8)
+		if r == model.RoleSuperAdmin {
 			c.Next()
 			return
 		}
 
-		accountID, _ := c.Get("account_id")
+		accountID := c.GetUint64("account_id")
 
 		// Get account permissions
-		perms, err := accountRepo.GetPermissionsByAccountID(accountID.(uint64))
+		perms, err := accountRepo.GetPermissionsByAccountID(accountID)
 		if err != nil {
 			response.InternalError(c, "权限查询失败")
 			c.Abort()

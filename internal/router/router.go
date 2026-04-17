@@ -27,7 +27,7 @@ func SetupRouter(
 	api := r.Group("/api/v1")
 
 	// ========== Public (no auth) ==========
-	api.POST("/login", accountHandler.Login)
+	api.POST("/login", middleware.LoginRateLimit(), accountHandler.Login)
 
 	// ========== Authenticated routes ==========
 	auth := api.Group("")

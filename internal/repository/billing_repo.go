@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"supply-chain/internal/model"
+	"supply-chain/pkg/sqlutil"
 	"time"
 
 	"gorm.io/gorm"
@@ -406,7 +407,8 @@ func (r *BillingRepo) ListBillingRecords(req *model.BillingListReq, accountID ui
 
 	// Keyword: order number or flow_no
 	if req.Keyword != "" {
-		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", "%"+req.Keyword+"%", "%"+req.Keyword+"%")
+		kw := sqlutil.EscapeLike(req.Keyword)
+		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", kw, kw)
 	}
 
 	// Time filter — preset days take priority over explicit dates

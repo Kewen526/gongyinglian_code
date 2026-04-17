@@ -18,10 +18,10 @@ func NewBillingHandler(billingSvc *service.BillingService) *BillingHandler {
 
 // GET /api/v1/billing/wallet
 func (h *BillingHandler) GetWallet(c *gin.Context) {
-	accountID, _ := c.Get("account_id")
-	wallet, err := h.billingSvc.GetWallet(accountID.(uint64))
+	accountID := c.GetUint64("account_id")
+	wallet, err := h.billingSvc.GetWallet(accountID)
 	if err != nil {
-		response.InternalError(c, "查询钱包失败: "+err.Error())
+		response.InternalError(c, "查询钱包失败")
 		return
 	}
 	response.Success(c, wallet)
@@ -29,13 +29,13 @@ func (h *BillingHandler) GetWallet(c *gin.Context) {
 
 // POST /api/v1/billing/recharge
 func (h *BillingHandler) SubmitRecharge(c *gin.Context) {
-	accountID, _ := c.Get("account_id")
+	accountID := c.GetUint64("account_id")
 	var req model.SubmitRechargeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
+		response.BadRequest(c, "参数错误")
 		return
 	}
-	if err := h.billingSvc.SubmitRecharge(accountID.(uint64), &req); err != nil {
+	if err := h.billingSvc.SubmitRecharge(accountID, &req); err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
@@ -44,15 +44,15 @@ func (h *BillingHandler) SubmitRecharge(c *gin.Context) {
 
 // GET /api/v1/billing
 func (h *BillingHandler) ListBillingRecords(c *gin.Context) {
-	accountID, _ := c.Get("account_id")
+	accountID := c.GetUint64("account_id")
 	var req model.BillingListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
+		response.BadRequest(c, "参数错误")
 		return
 	}
-	result, err := h.billingSvc.ListBillingRecords(accountID.(uint64), &req)
+	result, err := h.billingSvc.ListBillingRecords(accountID, &req)
 	if err != nil {
-		response.InternalError(c, "查询失败: "+err.Error())
+		response.InternalError(c, "查询失败")
 		return
 	}
 	response.Success(c, result)
@@ -60,15 +60,15 @@ func (h *BillingHandler) ListBillingRecords(c *gin.Context) {
 
 // GET /api/v1/billing/recharge-records
 func (h *BillingHandler) ListMyRechargeRecords(c *gin.Context) {
-	accountID, _ := c.Get("account_id")
+	accountID := c.GetUint64("account_id")
 	var req model.MyRechargeListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
+		response.BadRequest(c, "参数错误")
 		return
 	}
-	result, err := h.billingSvc.ListMyRechargeRecords(accountID.(uint64), &req)
+	result, err := h.billingSvc.ListMyRechargeRecords(accountID, &req)
 	if err != nil {
-		response.InternalError(c, "查询失败: "+err.Error())
+		response.InternalError(c, "查询失败")
 		return
 	}
 	response.Success(c, result)
