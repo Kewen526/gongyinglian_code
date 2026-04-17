@@ -111,7 +111,7 @@ func (r *WarehouseRepo) GenerateFlowNo(tx *gorm.DB) (string, error) {
 	today := time.Now().Format("20060102")
 	prefix := "CW-" + today + "-"
 
-	var maxFlowNo string
+	var maxFlowNo *string
 	err := tx.Model(&model.WarehouseBillingRecord{}).
 		Where("flow_no LIKE ?", prefix+"%").
 		Select("MAX(flow_no)").
@@ -121,8 +121,8 @@ func (r *WarehouseRepo) GenerateFlowNo(tx *gorm.DB) (string, error) {
 	}
 
 	seq := 1
-	if maxFlowNo != "" && len(maxFlowNo) >= len(prefix)+3 {
-		suffix := maxFlowNo[len(prefix):]
+	if maxFlowNo != nil && len(*maxFlowNo) >= len(prefix)+3 {
+		suffix := (*maxFlowNo)[len(prefix):]
 		if n, err := fmt.Sscanf(suffix, "%d", &seq); n == 1 && err == nil {
 			seq++
 		}
