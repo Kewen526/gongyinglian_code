@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"log"
 	"supply-chain/internal/model"
 	"supply-chain/internal/repository"
 
@@ -23,15 +24,18 @@ func (s *AccountService) Login(req *model.LoginReq) (*model.Account, error) {
 	account, err := s.repo.GetByUsername(req.Username)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("[Auth] Login failed: user=%s reason=not_found\n", req.Username)
 			return nil, errors.New("用户名或密码错误")
 		}
 		return nil, err
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(account.Password), []byte(req.Password)); err != nil {
+		log.Printf("[Auth] Login failed: user=%s reason=wrong_password\n", req.Username)
 		return nil, errors.New("用户名或密码错误")
 	}
 
+	log.Printf("[Auth] Login success: user=%s id=%d\n", req.Username, account.ID)
 	return account, nil
 }
 

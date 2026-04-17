@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"supply-chain/internal/model"
+	"supply-chain/pkg/sqlutil"
 	"time"
 
 	"gorm.io/gorm"
@@ -135,7 +136,8 @@ func (r *WarehouseRepo) GenerateFlowNo(tx *gorm.DB) (string, error) {
 func (r *WarehouseRepo) ListBillingRecords(req *model.WarehouseBillingListReq, accountID uint64) ([]model.WarehouseBillingRecord, int64, error) {
 	q := r.db.Model(&model.WarehouseBillingRecord{}).Where("account_id = ?", accountID)
 	if req.Keyword != "" {
-		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", "%"+req.Keyword+"%", "%"+req.Keyword+"%")
+		kw := sqlutil.EscapeLike(req.Keyword)
+		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", kw, kw)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -218,7 +220,8 @@ func (r *WarehouseRepo) ListRechargeRequests(req *model.WarehouseAdminRechargeLi
 func (r *WarehouseRepo) ListAllBillingRecords(req *model.WarehouseAdminBillingListReq) ([]model.WarehouseBillingRecord, int64, error) {
 	q := r.db.Model(&model.WarehouseBillingRecord{})
 	if req.Keyword != "" {
-		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", "%"+req.Keyword+"%", "%"+req.Keyword+"%")
+		kw := sqlutil.EscapeLike(req.Keyword)
+		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", kw, kw)
 	}
 	if req.StartDate != "" {
 		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")

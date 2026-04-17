@@ -2,6 +2,7 @@ package repository
 
 import (
 	"supply-chain/internal/model"
+	"supply-chain/pkg/sqlutil"
 	"time"
 
 	"gorm.io/gorm"
@@ -98,7 +99,7 @@ func (r *OrderRepo) ListTrades(req *model.OrderListReq, shopIDs []uint64) ([]mod
 
 	// Keyword search (trade_no or express_code)
 	if req.Keyword != "" {
-		kw := "%" + req.Keyword + "%"
+		kw := sqlutil.EscapeLike(req.Keyword)
 		query = query.Where("trade_no LIKE ? OR express_code LIKE ?", kw, kw)
 	}
 
