@@ -49,6 +49,7 @@ func (s *WarehouseService) autoDeductOnce() {
 	if err != nil {
 		log.Printf("[Warehouse] ListPendingWarehouseOrders error: %v\n", err)
 	} else {
+		log.Printf("[Warehouse] Found %d pending orders to process\n", len(pending))
 		for i := range pending {
 			if err := s.processDeduction(&pending[i]); err != nil {
 				log.Printf("[Warehouse] Deduction trade=%s error: %v\n", pending[i].TradeNo, err)
@@ -78,11 +79,13 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 
 	accountID, err := s.repo.ResolveEmployeeAccountID(trade.SysShop)
 	if err != nil || accountID == 0 {
+		log.Printf("[Warehouse] Skip trade=%s sysShop=%s: no employee found (accountID=%d, err=%v)\n", trade.TradeNo, trade.SysShop, accountID, err)
 		return nil
 	}
 
 	wallet, err := s.repo.GetWalletByAccountID(accountID)
 	if errors.Is(err, gorm.ErrRecordNotFound) || wallet == nil {
+		log.Printf("[Warehouse] Skip trade=%s: no wallet for account=%d\n", trade.TradeNo, accountID)
 		return nil
 	}
 	if err != nil {
@@ -115,7 +118,11 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 		s.repo.DB().Delete(&existing)
 	}
 
+	log.Printf("[Warehouse] Processing trade=%s account=%d items=%d shipping=%.2f packing=%.2f total=%.2f balance=%.2f\n",
+		trade.TradeNo, accountID, totalItems, shippingFee, packingFee, totalAmount, wallet.Balance)
+
 	if wallet.Balance < totalAmount {
+		log.Printf("[Warehouse] Insufficient balance for trade=%s: need=%.2f have=%.2f\n", trade.TradeNo, totalAmount, wallet.Balance)
 		_ = s.repo.UpdateWarehouseStatus(trade.UID, model.WarehouseStatusInsufficient)
 		return nil
 	}
