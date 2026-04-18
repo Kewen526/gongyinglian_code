@@ -364,7 +364,9 @@ func mapToOrderTrade(m map[string]interface{}) model.OrderTrade {
 		HasRefund:           getInt(m, "has_refund"),
 		IsExceptionTrade:    getBool(m, "is_exception_trade"),
 		TradeType:           getInt(m, "trade_type"),
-		Mark:                getString(m, "mark"),
+		// Mark 不从万里牛导入 —— 本字段由我们系统单向写入。
+		// 万里牛侧的自定义 mark（例如 "打包费"）不应污染审核状态。
+		// 新订单以空 mark 入库，走我们的审核流程。
 		Flag:                getInt(m, "flag"),
 		PayNo:               getString(m, "pay_no"),
 		PayType:             getString(m, "pay_type"),
