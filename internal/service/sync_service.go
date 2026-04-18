@@ -28,11 +28,15 @@ const (
 )
 
 // autoReviewBatchSize is the max orders per WanLiNiu batch-mark API call.
-const autoReviewBatchSize = 200
+// WanLiNiu's /erp/opentrade/modify/batch/mark endpoint caps at 10 orders per call
+// (error 1500: 最多只支持10笔订单).
+const autoReviewBatchSize = 10
 
 // autoReviewBatchDelay is the pause between consecutive WanLiNiu batch-mark calls
 // within a single cycle, to avoid hitting ERP rate limits on large backlogs.
-const autoReviewBatchDelay = 500 * time.Millisecond
+// With batch size 10 and ~5-minute cycle, this caps throughput at ~100 orders/sec,
+// leaving headroom for 30k+ orders per cycle.
+const autoReviewBatchDelay = 100 * time.Millisecond
 
 type SyncService struct {
 	orderRepo      *repository.OrderRepo
