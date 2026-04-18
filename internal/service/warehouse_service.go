@@ -191,15 +191,52 @@ func calcPackingFee(itemCount int) float64 {
 
 // ---------- Employee API ----------
 
-func (s *WarehouseService) GetWallet(accountID uint64) (*model.WarehouseWalletResp, error) {
-	wallet, err := s.repo.GetWalletByAccountID(accountID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return &model.WarehouseWalletResp{Balance: 0}, nil
+func (s *WarehouseService) resolveEffectiveAccountIDs(callerID uint64, role uint8) ([]uint64, error) {
+	switch role {
+	case model.RoleEmployee:
+		return []uint64{callerID}, nil
+	case model.RoleSupervisor, model.RoleTeamLead:
+		shopIDs, err := s.repo.GetAccountShopIDs(callerID)
+		if err != nil {
+			return nil, err
+		}
+		return s.repo.GetEmployeeAccountIDsByShopIDs(shopIDs)
+	case model.RoleSuperAdmin:
+		return s.repo.GetAllEmployeeAccountIDs()
+	default:
+		return []uint64{callerID}, nil
 	}
+}
+
+func (s *WarehouseService) GetWallet(accountID uint64, role uint8) (*model.WarehouseWalletResp, error) {
+	if role == model.RoleEmployee {
+		wallet, err := s.repo.GetWalletByAccountID(accountID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &model.WarehouseWalletResp{Balance: 0}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &model.WarehouseWalletResp{Balance: wallet.Balance}, nil
+	}
+	accountIDs, err := s.resolveEffectiveAccountIDs(accountID, role)
 	if err != nil {
 		return nil, err
 	}
-	return &model.WarehouseWalletResp{Balance: wallet.Balance}, nil
+	if len(accountIDs) == 0 {
+		return &model.WarehouseWalletResp{Balance: 0}, nil
+	}
+	wallets, err := s.repo.GetWalletsByAccountIDs(accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	var total float64
+	for _, w := range wallets {
+		total += w.Balance
+	}
+	return &model.WarehouseWalletResp{
+		Balance: math.Round(total*100) / 100,
+	}, nil
 }
 
 func (s *WarehouseService) SubmitRecharge(accountID uint64, req *model.WarehouseSubmitRechargeReq) error {
@@ -211,7 +248,6 @@ func (s *WarehouseService) SubmitRecharge(accountID uint64, req *model.Warehouse
 		return errors.New("该交易流水号已提交过，请勿重复提交")
 	}
 
-	// Create wallet on first recharge if not exists
 	_, walletErr := s.repo.GetWalletByAccountID(accountID)
 	if errors.Is(walletErr, gorm.ErrRecordNotFound) {
 		if err := s.repo.DB().Create(&model.WarehouseWallet{
@@ -232,12 +268,16 @@ func (s *WarehouseService) SubmitRecharge(accountID uint64, req *model.Warehouse
 	})
 }
 
-func (s *WarehouseService) ListBillingRecords(accountID uint64, req *model.WarehouseBillingListReq) (*model.WarehouseBillingListResp, error) {
-	records, total, err := s.repo.ListBillingRecords(req, accountID)
+func (s *WarehouseService) ListBillingRecords(accountID uint64, role uint8, req *model.WarehouseBillingListReq) (*model.WarehouseBillingListResp, error) {
+	accountIDs, err := s.resolveEffectiveAccountIDs(accountID, role)
 	if err != nil {
 		return nil, err
 	}
-	wallet, _ := s.GetWallet(accountID)
+	records, total, err := s.repo.ListBillingRecords(req, accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	wallet, _ := s.GetWallet(accountID, role)
 	if wallet == nil {
 		wallet = &model.WarehouseWalletResp{Balance: 0}
 	}
@@ -248,8 +288,12 @@ func (s *WarehouseService) ListBillingRecords(accountID uint64, req *model.Wareh
 	}, nil
 }
 
-func (s *WarehouseService) ListMyRechargeRecords(accountID uint64, req *model.WarehouseMyRechargeListReq) (*model.WarehouseMyRechargeListResp, error) {
-	records, total, err := s.repo.ListRechargeRequestsByAccountID(accountID, req.Page, req.PageSize)
+func (s *WarehouseService) ListMyRechargeRecords(accountID uint64, role uint8, req *model.WarehouseMyRechargeListReq) (*model.WarehouseMyRechargeListResp, error) {
+	accountIDs, err := s.resolveEffectiveAccountIDs(accountID, role)
+	if err != nil {
+		return nil, err
+	}
+	records, total, err := s.repo.ListRechargeRequestsByAccountIDs(accountIDs, req.Page, req.PageSize)
 	if err != nil {
 		return nil, err
 	}

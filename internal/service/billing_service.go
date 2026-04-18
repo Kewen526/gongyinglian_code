@@ -560,8 +560,50 @@ func (s *BillingService) getOrSkipWallet(accountID uint64) (*model.Wallet, error
 
 // ---------- Public API methods ----------
 
-// GetWallet returns wallet info for an account; creates it on first recharge, not here.
-func (s *BillingService) GetWallet(accountID uint64) (*model.WalletResp, error) {
+// resolveEffectiveAccountIDs determines which employee account IDs the caller can see.
+func (s *BillingService) resolveEffectiveAccountIDs(callerID uint64, role uint8) ([]uint64, error) {
+	switch role {
+	case model.RoleEmployee:
+		return []uint64{callerID}, nil
+	case model.RoleSupervisor, model.RoleTeamLead:
+		shopIDs, err := s.billingRepo.GetAccountShopIDs(callerID)
+		if err != nil {
+			return nil, err
+		}
+		return s.billingRepo.GetEmployeeAccountIDsByShopIDs(shopIDs)
+	case model.RoleSuperAdmin:
+		return s.billingRepo.GetAllEmployeeAccountIDs()
+	default:
+		return []uint64{callerID}, nil
+	}
+}
+
+// GetWallet returns wallet info. Managers see aggregated balance without level/discount.
+func (s *BillingService) GetWallet(accountID uint64, role uint8) (*model.WalletResp, error) {
+	if role == model.RoleEmployee {
+		return s.getEmployeeWallet(accountID)
+	}
+	accountIDs, err := s.resolveEffectiveAccountIDs(accountID, role)
+	if err != nil {
+		return nil, err
+	}
+	if len(accountIDs) == 0 {
+		return &model.WalletResp{Balance: 0}, nil
+	}
+	wallets, err := s.billingRepo.GetWalletsByAccountIDs(accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	var total float64
+	for _, w := range wallets {
+		total += w.Balance
+	}
+	return &model.WalletResp{
+		Balance: math.Round(total*100) / 100,
+	}, nil
+}
+
+func (s *BillingService) getEmployeeWallet(accountID uint64) (*model.WalletResp, error) {
 	wallet, err := s.billingRepo.GetWalletByAccountID(accountID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return &model.WalletResp{
@@ -726,31 +768,51 @@ func (s *BillingService) ExportBillingRecords(req *model.AdminBillingListReq) ([
 
 // ---------- Employee: own recharge records ----------
 
-// ListMyRechargeRecords returns the recharge history for the logged-in user.
-func (s *BillingService) ListMyRechargeRecords(accountID uint64, req *model.MyRechargeListReq) (*model.MyRechargeListResp, error) {
-	records, total, err := s.billingRepo.ListRechargeRequestsByAccountID(accountID, req.Page, req.PageSize)
+// ListMyRechargeRecords returns recharge history. Managers see records for all employees under their shops.
+func (s *BillingService) ListMyRechargeRecords(accountID uint64, role uint8, req *model.MyRechargeListReq) (*model.MyRechargeListResp, error) {
+	accountIDs, err := s.resolveEffectiveAccountIDs(accountID, role)
+	if err != nil {
+		return nil, err
+	}
+	records, total, err := s.billingRepo.ListRechargeRequestsByAccountIDs(accountIDs, req.Page, req.PageSize)
 	if err != nil {
 		return nil, err
 	}
 	return &model.MyRechargeListResp{Total: total, List: records}, nil
 }
 
-// ListBillingRecords returns filtered billing records plus wallet summary.
-// ExportMyBillingRecords generates an Excel file for an employee's filtered billing records.
-func (s *BillingService) ExportMyBillingRecords(accountID uint64, req *model.BillingListReq) ([]byte, error) {
-	records, err := s.billingRepo.GetBillingRecordsForExport(req, accountID)
+// ExportMyBillingRecords generates an Excel file. Managers get multi-account export with user info.
+func (s *BillingService) ExportMyBillingRecords(accountID uint64, role uint8, req *model.BillingListReq) ([]byte, error) {
+	accountIDs, err := s.resolveEffectiveAccountIDs(accountID, role)
 	if err != nil {
 		return nil, err
+	}
+	records, err := s.billingRepo.GetBillingRecordsForExport(req, accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	if role != model.RoleEmployee {
+		ids := make([]uint64, 0, len(records))
+		for _, r := range records {
+			ids = append(ids, r.AccountID)
+		}
+		accountMap, _ := s.billingRepo.GetAccountInfoByIDs(ids)
+		return buildBillingExcel(records, accountMap)
 	}
 	return buildMyBillingExcel(records)
 }
 
-func (s *BillingService) ListBillingRecords(accountID uint64, req *model.BillingListReq) (*model.BillingListResp, error) {
-	records, total, err := s.billingRepo.ListBillingRecords(req, accountID)
+// ListBillingRecords returns filtered billing records plus wallet summary.
+func (s *BillingService) ListBillingRecords(accountID uint64, role uint8, req *model.BillingListReq) (*model.BillingListResp, error) {
+	accountIDs, err := s.resolveEffectiveAccountIDs(accountID, role)
 	if err != nil {
 		return nil, err
 	}
-	wallet, _ := s.GetWallet(accountID)
+	records, total, err := s.billingRepo.ListBillingRecords(req, accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	wallet, _ := s.GetWallet(accountID, role)
 	if wallet == nil {
 		wallet = &model.WalletResp{DiscountDisplay: "85折", Level: "V1", DiscountRate: 0.85}
 	}
