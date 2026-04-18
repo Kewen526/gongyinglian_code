@@ -352,15 +352,27 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 // CheckAutoReviewEligible checks if an order can be auto-reviewed.
 // Checks: shop assigned to employee → product exists → 1688 price found → balance sufficient.
 func (s *BillingService) CheckAutoReviewEligible(sysShop, tradeUID string) DeductCheckResult {
+	t0 := time.Now()
 	accountID, err := s.resolveAccountID(sysShop)
+	if d := time.Since(t0); d > 2*time.Second {
+		log.Printf("[AutoReview][SLOW] resolveAccountID sysShop=%s took %v\n", sysShop, d)
+	}
 	if err != nil || accountID == 0 {
 		return DeductSkip
 	}
+	t1 := time.Now()
 	cost, err := s.calculateOrderAmount(tradeUID)
+	if d := time.Since(t1); d > 2*time.Second {
+		log.Printf("[AutoReview][SLOW] calculateOrderAmount uid=%s took %v\n", tradeUID, d)
+	}
 	if err != nil {
 		return DeductBarcodeError
 	}
+	t2 := time.Now()
 	wallet, err := s.getOrSkipWallet(accountID)
+	if d := time.Since(t2); d > 2*time.Second {
+		log.Printf("[AutoReview][SLOW] getOrSkipWallet account=%d took %v\n", accountID, d)
+	}
 	if err != nil || wallet == nil {
 		return DeductInsufficient
 	}
