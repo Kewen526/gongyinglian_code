@@ -97,3 +97,55 @@ func buildBillingExcel(records []model.BillingRecord, accountMap map[uint64]repo
 	}
 	return buf.Bytes(), nil
 }
+
+// buildMyBillingExcel creates an Excel workbook for a single employee's billing records.
+func buildMyBillingExcel(records []model.BillingRecord) ([]byte, error) {
+	f := excelize.NewFile()
+	sheet := "我的账单"
+	f.SetSheetName("Sheet1", sheet)
+
+	headers := []string{
+		"发生时间", "客户资金流水号", "平台", "店铺名", "订单号",
+		"类型", "状态", "金额", "交易后余额",
+	}
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sheet, cell, h)
+	}
+
+	style, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"DDEBF7"}, Pattern: 1},
+	})
+	f.SetCellStyle(sheet, "A1", fmt.Sprintf("%s1", string(rune('A'+len(headers)-1))), style)
+
+	for i, rec := range records {
+		row := i + 2
+		values := []interface{}{
+			rec.CreatedAt.Format("2006-01-02 15:04:05"),
+			rec.FlowNo,
+			rec.Platform,
+			rec.ShopName,
+			rec.TradeNo,
+			typeLabel(rec.Type),
+			statusLabel(rec.Status),
+			rec.ActualAmount,
+			rec.BalanceAfter,
+		}
+		for j, v := range values {
+			cell, _ := excelize.CoordinatesToCellName(j+1, row)
+			f.SetCellValue(sheet, cell, v)
+		}
+	}
+
+	for i := range headers {
+		col := string(rune('A' + i))
+		f.SetColWidth(sheet, col, col, 20)
+	}
+
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}

@@ -458,3 +458,43 @@ func (r *BillingRepo) ListBillingRecords(req *model.BillingListReq, accountID ui
 	err := q.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&records).Error
 	return records, total, err
 }
+
+// GetBillingRecordsForExport returns all records matching the same filters as
+// ListBillingRecords but without pagination (for Excel export).
+func (r *BillingRepo) GetBillingRecordsForExport(req *model.BillingListReq, accountID uint64) ([]model.BillingRecord, error) {
+	q := r.db.Model(&model.BillingRecord{}).Where("account_id = ? AND status != 'insufficient' AND NOT (status = 'error' AND actual_amount = 0)", accountID)
+
+	if req.Keyword != "" {
+		kw := sqlutil.EscapeLike(req.Keyword)
+		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", kw, kw)
+	}
+	if req.Days > 0 {
+		since := time.Now().AddDate(0, 0, -req.Days)
+		q = q.Where("created_at >= ?", since)
+	} else {
+		if req.StartDate != "" {
+			q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
+		}
+		if req.EndDate != "" {
+			q = q.Where("created_at <= ?", req.EndDate+" 23:59:59")
+		}
+	}
+	if req.Platform != "" {
+		q = q.Where("platform = ?", req.Platform)
+	}
+	if req.ShopName != "" {
+		q = q.Where("shop_name = ?", req.ShopName)
+	}
+	switch req.Status {
+	case "success":
+		q = q.Where("type = 'deduct' AND status = 'success'")
+	case "refund":
+		q = q.Where("type = 'refund' AND status = 'success'")
+	case "error":
+		q = q.Where("status = 'error'")
+	}
+
+	var records []model.BillingRecord
+	err := q.Order("created_at DESC").Find(&records).Error
+	return records, err
+}
