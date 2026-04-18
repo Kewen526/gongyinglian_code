@@ -58,6 +58,23 @@ func (h *BillingHandler) ListBillingRecords(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// GET /api/v1/billing/export
+func (h *BillingHandler) ExportBillingRecords(c *gin.Context) {
+	accountID := c.GetUint64("account_id")
+	var req model.BillingListReq
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误")
+		return
+	}
+	data, err := h.billingSvc.ExportMyBillingRecords(accountID, &req)
+	if err != nil {
+		response.InternalError(c, "导出失败")
+		return
+	}
+	c.Header("Content-Disposition", "attachment; filename=billing.xlsx")
+	c.Data(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data)
+}
+
 // GET /api/v1/billing/recharge-records
 func (h *BillingHandler) ListMyRechargeRecords(c *gin.Context) {
 	accountID := c.GetUint64("account_id")

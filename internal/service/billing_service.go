@@ -736,6 +736,15 @@ func (s *BillingService) ListMyRechargeRecords(accountID uint64, req *model.MyRe
 }
 
 // ListBillingRecords returns filtered billing records plus wallet summary.
+// ExportMyBillingRecords generates an Excel file for an employee's filtered billing records.
+func (s *BillingService) ExportMyBillingRecords(accountID uint64, req *model.BillingListReq) ([]byte, error) {
+	records, err := s.billingRepo.GetBillingRecordsForExport(req, accountID)
+	if err != nil {
+		return nil, err
+	}
+	return buildMyBillingExcel(records)
+}
+
 func (s *BillingService) ListBillingRecords(accountID uint64, req *model.BillingListReq) (*model.BillingListResp, error) {
 	records, total, err := s.billingRepo.ListBillingRecords(req, accountID)
 	if err != nil {

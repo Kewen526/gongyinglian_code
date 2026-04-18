@@ -140,6 +140,7 @@ func SetupRouter(
 	{
 		billingGroup.GET("/billing/wallet", billingHandler.GetWallet)
 		billingGroup.GET("/billing", billingHandler.ListBillingRecords)
+		billingGroup.GET("/billing/export", billingHandler.ExportBillingRecords)
 		billingGroup.POST("/billing/recharge", billingHandler.SubmitRecharge)
 		billingGroup.GET("/billing/recharge-records", billingHandler.ListMyRechargeRecords)
 	}
