@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"supply-chain/internal/model"
 	"supply-chain/internal/repository"
 	"time"
@@ -134,34 +135,44 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 		tradeTime = time.UnixMilli(trade.SendTimeMs)
 	}
 
-	txErr := s.repo.DB().Transaction(func(tx *gorm.DB) error {
-		flowNo, err := s.repo.GenerateFlowNo(tx)
-		if err != nil {
-			return fmt.Errorf("生成流水号失败: %w", err)
-		}
+	var txErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		txErr = s.repo.DB().Transaction(func(tx *gorm.DB) error {
+			flowNo, err := s.repo.GenerateFlowNo(tx)
+			if err != nil {
+				return fmt.Errorf("生成流水号失败: %w", err)
+			}
 
-		rec := &model.WarehouseBillingRecord{
-			FlowNo:        flowNo,
-			AccountID:     accountID,
-			TradeNo:       trade.TradeNo,
-			TradeUID:      trade.UID,
-			ShopName:      trade.ShopName,
-			BusinessType:  "订单发货",
-			ShippingFee:   shippingFee,
-			PackingFee:    packingFee,
-			TotalAmount:   totalAmount,
-			ItemCount:     totalItems,
-			BalanceBefore: wallet.Balance,
-			BalanceAfter:  newBalance,
-			Status:        "success",
-			TradeTime:     tradeTime,
-		}
+			rec := &model.WarehouseBillingRecord{
+				FlowNo:        flowNo,
+				AccountID:     accountID,
+				TradeNo:       trade.TradeNo,
+				TradeUID:      trade.UID,
+				ShopName:      trade.ShopName,
+				BusinessType:  "订单发货",
+				ShippingFee:   shippingFee,
+				PackingFee:    packingFee,
+				TotalAmount:   totalAmount,
+				ItemCount:     totalItems,
+				BalanceBefore: wallet.Balance,
+				BalanceAfter:  newBalance,
+				Status:        "success",
+				TradeTime:     tradeTime,
+			}
 
-		if err := s.repo.CreateBillingRecord(tx, rec); err != nil {
-			return err
+			if err := s.repo.CreateBillingRecord(tx, rec); err != nil {
+				return err
+			}
+			return s.repo.UpdateWalletBalance(tx, accountID, newBalance)
+		})
+		if txErr == nil {
+			break
 		}
-		return s.repo.UpdateWalletBalance(tx, accountID, newBalance)
-	})
+		if !strings.Contains(txErr.Error(), "Duplicate") {
+			break
+		}
+		log.Printf("[Warehouse] flow_no collision for trade=%s, retry %d/5\n", trade.TradeNo, attempt+1)
+	}
 	if txErr != nil {
 		return txErr
 	}

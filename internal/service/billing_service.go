@@ -22,9 +22,16 @@ func makeFlowNo(prefix, sysShop, tradeNo string) string {
 	return fmt.Sprintf("%s%x", prefix, h[:6])
 }
 
-// platformFallback maps platform names to their fallback aliases for price lookup.
+// platformFallback maps order platform names to their price-table equivalents.
 var platformFallback = map[string]string{
 	"阿里巴巴": "1688",
+	"淘工厂":  "1688",
+	"抖店":   "1688",
+	"抖音供销": "1688",
+	"快手小店": "1688",
+	"小红书":  "1688",
+	"其他平台": "1688",
+	"SHOPEE_FMS": "1688",
 }
 
 // DeductCheckResult reports why an order can or cannot be审核'd right now.
