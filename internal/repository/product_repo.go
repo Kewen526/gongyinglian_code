@@ -50,6 +50,32 @@ func (r *ProductRepo) GetControlPrice(productCode, platformName, fallbackPlatfor
 	return 0, false, nil
 }
 
+// BatchGetControlPrices returns a map[productCode]controlPrice for all matching
+// products that have a price entry on the given platform.
+func (r *ProductRepo) BatchGetControlPrices(productCodes []string, platformName string) (map[string]float64, error) {
+	if len(productCodes) == 0 {
+		return make(map[string]float64), nil
+	}
+	type row struct {
+		ProductCode  string  `gorm:"column:product_code"`
+		ControlPrice float64 `gorm:"column:control_price"`
+	}
+	var rows []row
+	err := r.db.Table("product").
+		Select("product.product_code, product_platform_price.control_price").
+		Joins("JOIN product_platform_price ON product_platform_price.product_id = product.id").
+		Where("product.product_code IN ? AND product_platform_price.platform_name = ?", productCodes, platformName).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]float64, len(rows))
+	for _, r := range rows {
+		result[r.ProductCode] = r.ControlPrice
+	}
+	return result, nil
+}
+
 // CreateWithDetails creates a product and all provided sub-resources in a single transaction.
 // Sub-resource slices may be empty/nil.
 func (r *ProductRepo) CreateWithDetails(

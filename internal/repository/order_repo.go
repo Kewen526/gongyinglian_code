@@ -320,7 +320,6 @@ func (r *OrderRepo) ListAutoReviewCandidates(sysShops []string) ([]model.OrderTr
 			sysShops, true,
 			[]string{"", model.MarkDeductFailed, model.MarkBarcodeError}).
 		Order("create_time_ms ASC").
-		Limit(500).
 		Find(&trades).Error
 	return trades, err
 }
