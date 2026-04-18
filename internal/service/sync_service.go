@@ -849,6 +849,11 @@ func (s *SyncService) BatchMarkOrdersWithBalanceCheck(items []model.MarkItem) (*
 // It scans accounts with auto_review=true and marks qualifying orders on WanLiNiu.
 func (s *SyncService) StartAutoReview() {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[AutoReview] PANIC recovered: %v\n", r)
+			}
+		}()
 		log.Println("[AutoReview] Task started (interval=5m)")
 		s.autoReviewOnce()
 		ticker := time.NewTicker(5 * time.Minute)
@@ -866,14 +871,21 @@ func (s *SyncService) StartAutoReview() {
 }
 
 func (s *SyncService) autoReviewOnce() {
+	log.Println("[AutoReview] Cycle started")
 	accounts, err := s.accountRepo.ListEmployees()
 	if err != nil {
 		log.Printf("[AutoReview] ListEmployees error: %v\n", err)
 		return
 	}
+	if len(accounts) == 0 {
+		log.Println("[AutoReview] No employee accounts found, skipping")
+		return
+	}
+	log.Printf("[AutoReview] Processing %d accounts\n", len(accounts))
 	for i := range accounts {
 		s.processAccountAutoReview(&accounts[i])
 	}
+	log.Println("[AutoReview] Cycle finished")
 }
 
 // processAccountAutoReview handles the full auto-review cycle for one account.
@@ -885,18 +897,29 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 		return
 	}
 	if len(shopIDs) == 0 {
+		log.Printf("[AutoReview] Account=%d has no shops, skipping\n", account.ID)
 		return
 	}
 
 	// Step 2: convert shop IDs to sys_shop strings (single Pluck query)
 	sysShops, err := s.shopRepo.GetSysShopsByIDs(shopIDs)
-	if err != nil || len(sysShops) == 0 {
+	if err != nil {
+		log.Printf("[AutoReview] GetSysShopsByIDs account=%d: %v\n", account.ID, err)
+		return
+	}
+	if len(sysShops) == 0 {
+		log.Printf("[AutoReview] Account=%d shopIDs=%v resolved to 0 sysShops, skipping\n", account.ID, shopIDs)
 		return
 	}
 
 	// Step 3: fetch paid, un-reviewed candidates (capped at 500)
 	candidates, err := s.orderRepo.ListAutoReviewCandidates(sysShops)
-	if err != nil || len(candidates) == 0 {
+	if err != nil {
+		log.Printf("[AutoReview] ListAutoReviewCandidates account=%d: %v\n", account.ID, err)
+		return
+	}
+	if len(candidates) == 0 {
+		log.Printf("[AutoReview] Account=%d no candidates found\n", account.ID)
 		return
 	}
 
@@ -939,6 +962,8 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 			log.Printf("[AutoReview] Account=%d marked %d orders as 审核失败货号错误\n", account.ID, len(barcodeErrorUIDs))
 		}
 	}
+	log.Printf("[AutoReview] Account=%d candidates=%d approved=%d insufficient=%d barcodeErr=%d\n",
+		account.ID, len(candidates), len(approved), len(insufficientUIDs), len(barcodeErrorUIDs))
 	if len(approved) == 0 {
 		return
 	}
