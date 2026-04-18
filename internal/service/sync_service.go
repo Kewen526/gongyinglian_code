@@ -925,27 +925,23 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 		return
 	}
 
-	log.Printf("[AutoReview] Account=%d checking %d candidates\n", account.ID, len(candidates))
-
-	// Step 4: balance-check each candidate
-	//   DeductOK          → push "已审核" to WanLiNiu
-	//   DeductInsufficient → locally mark "余额不足扣款失败" (no WanLiNiu push)
-	//   DeductSkip         → ignore this round (price error / no wallet / etc.)
+	// Step 4: batch eligibility check (3 SQL queries total: wallet + items + prices)
 	type approvedItem struct {
 		mark  model.MarkItem
 		trade *model.OrderTrade
 	}
+
+	checkStart := time.Now()
+	checkResults := s.billingService.BatchCheckAutoReviewEligible(account.ID, candidates)
+	log.Printf("[AutoReview] Account=%d checked %d candidates in %v\n",
+		account.ID, len(candidates), time.Since(checkStart).Round(time.Millisecond))
+
 	approved := make([]approvedItem, 0, len(candidates))
 	insufficientUIDs := make([]string, 0)
 	barcodeErrorUIDs := make([]string, 0)
-	checkStart := time.Now()
 	for i := range candidates {
 		t := &candidates[i]
-		if i > 0 && i%100 == 0 {
-			log.Printf("[AutoReview] Account=%d progress %d/%d (elapsed=%v)\n",
-				account.ID, i, len(candidates), time.Since(checkStart).Round(time.Millisecond))
-		}
-		switch s.billingService.CheckAutoReviewEligible(t.SysShop, t.UID) {
+		switch checkResults[t.UID] {
 		case DeductOK:
 			approved = append(approved, approvedItem{
 				mark:  model.MarkItem{BillCode: t.TradeNo, MarkName: model.MarkApproved, Type: 0},

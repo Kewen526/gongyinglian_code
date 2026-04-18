@@ -387,6 +387,106 @@ func (s *BillingService) CheckAutoReviewEligible(sysShop, tradeUID string) Deduc
 	return DeductOK
 }
 
+// BatchCheckAutoReviewEligible checks all candidates in bulk using only 3 SQL queries
+// (wallet + items + prices), then computes eligibility in memory.
+func (s *BillingService) BatchCheckAutoReviewEligible(accountID uint64, candidates []model.OrderTrade) map[string]DeductCheckResult {
+	results := make(map[string]DeductCheckResult, len(candidates))
+
+	wallet, err := s.getOrSkipWallet(accountID)
+	if err != nil || wallet == nil {
+		for _, c := range candidates {
+			results[c.UID] = DeductInsufficient
+		}
+		return results
+	}
+	discountRate := wallet.DiscountRate
+	if discountRate == 0 {
+		discountRate = 0.85
+	}
+
+	tradeUIDs := make([]string, len(candidates))
+	for i, c := range candidates {
+		tradeUIDs[i] = c.UID
+	}
+
+	itemsMap, err := s.orderRepo.BatchGetItemsByTradeUIDs(tradeUIDs)
+	if err != nil {
+		log.Printf("[AutoReview] BatchGetItemsByTradeUIDs error: %v\n", err)
+		for _, c := range candidates {
+			results[c.UID] = DeductSkip
+		}
+		return results
+	}
+
+	productCodeSet := make(map[string]struct{})
+	for _, items := range itemsMap {
+		for _, item := range items {
+			if item.BarCode == "" {
+				continue
+			}
+			parts := strings.SplitN(item.BarCode, "-", 2)
+			if code := strings.TrimSpace(parts[0]); code != "" {
+				productCodeSet[code] = struct{}{}
+			}
+		}
+	}
+	productCodes := make([]string, 0, len(productCodeSet))
+	for code := range productCodeSet {
+		productCodes = append(productCodes, code)
+	}
+
+	priceMap, err := s.productRepo.BatchGetControlPrices(productCodes, "1688")
+	if err != nil {
+		log.Printf("[AutoReview] BatchGetControlPrices error: %v\n", err)
+		for _, c := range candidates {
+			results[c.UID] = DeductSkip
+		}
+		return results
+	}
+
+	for _, c := range candidates {
+		items := itemsMap[c.UID]
+		if len(items) == 0 {
+			results[c.UID] = DeductBarcodeError
+			continue
+		}
+
+		var total float64
+		barcodeErr := false
+		for _, item := range items {
+			if item.BarCode == "" {
+				barcodeErr = true
+				break
+			}
+			parts := strings.SplitN(item.BarCode, "-", 2)
+			productCode := strings.TrimSpace(parts[0])
+			if productCode == "" {
+				barcodeErr = true
+				break
+			}
+			price, found := priceMap[productCode]
+			if !found {
+				barcodeErr = true
+				break
+			}
+			total += price * float64(item.Size)
+		}
+		if barcodeErr {
+			results[c.UID] = DeductBarcodeError
+			continue
+		}
+
+		actual := math.Round(total*discountRate*100) / 100
+		if wallet.Balance < actual {
+			results[c.UID] = DeductInsufficient
+		} else {
+			results[c.UID] = DeductOK
+		}
+	}
+
+	return results
+}
+
 // calculateOrderAmount computes the total 1688 control-price amount for an order's items.
 // Always uses the 1688 platform price regardless of the order's source platform.
 func (s *BillingService) calculateOrderAmount(tradeUID string) (float64, error) {
