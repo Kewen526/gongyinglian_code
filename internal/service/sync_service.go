@@ -783,7 +783,7 @@ func (s *SyncService) BatchMarkOrdersWithBalanceCheck(items []model.MarkItem) (*
 			result.Skipped++
 			continue
 		}
-		switch s.billingService.CheckDeductible(trade.SysShop, trade.UID, trade.SourcePlatform) {
+		switch s.billingService.CheckAutoReviewEligible(trade.SysShop, trade.UID, trade.SourcePlatform) {
 		case DeductOK:
 			toPush = append(toPush, m)
 			approvedUIDs = append(approvedUIDs, trade.UID)
