@@ -42,8 +42,10 @@ type WarehouseBillingRecord struct {
 	AccountID     uint64    `json:"account_id" gorm:"not null;index;comment:账号ID"`
 	TradeNo       string    `json:"trade_no" gorm:"type:varchar(64);index;comment:关联订单号"`
 	TradeUID      string    `json:"trade_uid" gorm:"type:varchar(64);uniqueIndex;comment:订单UID"`
+	Platform      string    `json:"platform" gorm:"type:varchar(64);default:'';comment:平台"`
 	ShopName      string    `json:"shop_name" gorm:"type:varchar(128);comment:店铺名"`
 	BusinessType  string    `json:"business_type" gorm:"type:varchar(32);default:'订单发货';comment:业务类型"`
+	Type          string    `json:"type" gorm:"type:varchar(16);default:'deduct';comment:deduct/recharge"`
 	ShippingFee   float64   `json:"shipping_fee" gorm:"type:decimal(12,2);default:0;comment:运费"`
 	PackingFee    float64   `json:"packing_fee" gorm:"type:decimal(12,2);default:0;comment:打包费"`
 	TotalAmount   float64   `json:"total_amount" gorm:"type:decimal(12,2);default:0;comment:总扣款金额"`
@@ -72,9 +74,12 @@ type WarehouseSubmitRechargeReq struct {
 }
 
 type WarehouseBillingListReq struct {
-	Keyword  string `form:"keyword"`
-	Page     int    `form:"page"`
-	PageSize int    `form:"page_size"`
+	Keyword   string `form:"keyword"`
+	ShopName  string `form:"shop_name"`
+	StartDate string `form:"start_date"`
+	EndDate   string `form:"end_date"`
+	Page      int    `form:"page"`
+	PageSize  int    `form:"page_size"`
 }
 
 type WarehouseBillingListResp struct {
