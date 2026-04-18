@@ -938,8 +938,13 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 	approved := make([]approvedItem, 0, len(candidates))
 	insufficientUIDs := make([]string, 0)
 	barcodeErrorUIDs := make([]string, 0)
+	checkStart := time.Now()
 	for i := range candidates {
 		t := &candidates[i]
+		if i > 0 && i%100 == 0 {
+			log.Printf("[AutoReview] Account=%d progress %d/%d (elapsed=%v)\n",
+				account.ID, i, len(candidates), time.Since(checkStart).Round(time.Millisecond))
+		}
 		switch s.billingService.CheckAutoReviewEligible(t.SysShop, t.UID) {
 		case DeductOK:
 			approved = append(approved, approvedItem{
