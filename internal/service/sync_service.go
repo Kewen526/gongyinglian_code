@@ -280,6 +280,9 @@ func (s *SyncService) saveOrders(rawOrders []map[string]interface{}) (int, error
 	saved := 0
 	for _, raw := range rawOrders {
 		trade := mapToOrderTrade(raw)
+		if trade.OlnStatus == 1 {
+			continue
+		}
 		items := mapToOrderItems(raw)
 
 		// Upsert shop
