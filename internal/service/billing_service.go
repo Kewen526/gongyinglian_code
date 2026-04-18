@@ -359,28 +359,16 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 }
 
 // CheckDeductible pre-evaluates whether an order can be审核'd right now.
-// Used by the auto-review and manual-mark paths to avoid pushing "已审核" to
-// WanLiNiu when the responsible account cannot cover the deduction.
+// Review is allowed for any order whose shop is assigned to an employee.
+// Wallet and balance only affect billing deduction, not the review decision.
 func (s *BillingService) CheckDeductible(sysShop, tradeUID, platform string) DeductCheckResult {
 	accountID, err := s.resolveAccountID(sysShop)
 	if err != nil || accountID == 0 {
 		return DeductSkip
 	}
-	wallet, err := s.getOrSkipWallet(accountID)
-	if err != nil || wallet == nil {
-		return DeductSkip
-	}
-	cost, err := s.calculateOrderAmount(tradeUID, platform)
+	_, err = s.calculateOrderAmount(tradeUID, platform)
 	if err != nil {
 		return DeductBarcodeError
-	}
-	discountRate := wallet.DiscountRate
-	if discountRate == 0 {
-		discountRate = 0.85
-	}
-	actual := math.Round(cost*discountRate*100) / 100
-	if wallet.Balance < actual {
-		return DeductInsufficient
 	}
 	return DeductOK
 }
