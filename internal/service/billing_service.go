@@ -23,16 +23,7 @@ func makeFlowNo(prefix, sysShop, tradeNo string) string {
 }
 
 // platformFallback maps order platform names to their price-table equivalents.
-var platformFallback = map[string]string{
-	"阿里巴巴": "1688",
-	"淘工厂":  "1688",
-	"抖店":   "1688",
-	"抖音供销": "1688",
-	"快手小店": "1688",
-	"小红书":  "1688",
-	"其他平台": "1688",
-	"SHOPEE_FMS": "1688",
-}
+var platformFallback = map[string]string{}
 
 // DeductCheckResult reports why an order can or cannot be审核'd right now.
 type DeductCheckResult int
@@ -254,7 +245,7 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	}
 
 	// Compute order amount
-	originalAmount, calcErr := s.calculateOrderAmount(trade.UID, trade.SourcePlatform)
+	originalAmount, calcErr := s.calculateOrderAmount(trade.UID)
 	flowNo := makeFlowNo("D", trade.SysShop, trade.TradeNo)
 
 	// Idempotency: if flow_no exists, try to delete retryable (error/insufficient) record.
@@ -359,22 +350,34 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 }
 
 // CheckAutoReviewEligible checks if an order can be auto-reviewed.
-// Approves if the shop is assigned to an employee and the product exists.
-// Balance is not checked here — billing deduction is a separate process.
-func (s *BillingService) CheckAutoReviewEligible(sysShop, tradeUID, platform string) DeductCheckResult {
+// Checks: shop assigned to employee → product exists → 1688 price found → balance sufficient.
+func (s *BillingService) CheckAutoReviewEligible(sysShop, tradeUID string) DeductCheckResult {
 	accountID, err := s.resolveAccountID(sysShop)
 	if err != nil || accountID == 0 {
 		return DeductSkip
 	}
-	_, err = s.calculateOrderAmount(tradeUID, platform)
+	cost, err := s.calculateOrderAmount(tradeUID)
 	if err != nil {
 		return DeductBarcodeError
+	}
+	wallet, err := s.getOrSkipWallet(accountID)
+	if err != nil || wallet == nil {
+		return DeductInsufficient
+	}
+	discountRate := wallet.DiscountRate
+	if discountRate == 0 {
+		discountRate = 0.85
+	}
+	actual := math.Round(cost*discountRate*100) / 100
+	if wallet.Balance < actual {
+		return DeductInsufficient
 	}
 	return DeductOK
 }
 
-// calculateOrderAmount computes the total control-price amount for an order's items.
-func (s *BillingService) calculateOrderAmount(tradeUID, platform string) (float64, error) {
+// calculateOrderAmount computes the total 1688 control-price amount for an order's items.
+// Always uses the 1688 platform price regardless of the order's source platform.
+func (s *BillingService) calculateOrderAmount(tradeUID string) (float64, error) {
 	items, err := s.orderRepo.GetItemsByTradeUID(tradeUID)
 	if err != nil {
 		return 0, fmt.Errorf("获取订单商品失败: %w", err)
@@ -383,7 +386,6 @@ func (s *BillingService) calculateOrderAmount(tradeUID, platform string) (float6
 		return 0, errors.New("订单无商品明细")
 	}
 
-	fallback := platformFallback[platform]
 	var total float64
 
 	for _, item := range items {
@@ -397,12 +399,12 @@ func (s *BillingService) calculateOrderAmount(tradeUID, platform string) (float6
 			return 0, fmt.Errorf("商品 [%s / %s] 解析货号失败", item.ItemName, item.SkuName)
 		}
 
-		price, found, err := s.productRepo.GetControlPrice(productCode, platform, fallback)
+		price, found, err := s.productRepo.GetControlPrice(productCode, "1688", "")
 		if err != nil {
 			return 0, fmt.Errorf("查询货号 %s 管控价格失败: %w", productCode, err)
 		}
 		if !found {
-			return 0, fmt.Errorf("货号 %s 在平台 %s 未找到管控价格", productCode, platform)
+			return 0, fmt.Errorf("货号 %s 未找到货号或1688管控价格", productCode)
 		}
 
 		total += price * float64(item.Size)
