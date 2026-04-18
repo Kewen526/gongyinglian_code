@@ -70,20 +70,46 @@ func (r *WarehouseRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amo
 			return errors.New("该充值申请已处理或不存在")
 		}
 
+		var balanceBefore, balanceAfter float64
 		var w model.WarehouseWallet
 		err := tx.Where("account_id = ?", accountID).First(&w).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return tx.Create(&model.WarehouseWallet{
+			balanceBefore = 0
+			balanceAfter = math.Round(amount*100) / 100
+			if err := tx.Create(&model.WarehouseWallet{
 				AccountID: accountID,
-				Balance:   math.Round(amount * 100) / 100,
-			}).Error
+				Balance:   balanceAfter,
+			}).Error; err != nil {
+				return err
+			}
 		} else if err != nil {
 			return err
+		} else {
+			balanceBefore = w.Balance
+			balanceAfter = math.Round((w.Balance+amount)*100) / 100
+			if err := tx.Model(&model.WarehouseWallet{}).
+				Where("account_id = ?", accountID).
+				Update("balance", balanceAfter).Error; err != nil {
+				return err
+			}
 		}
-		newBalance := math.Round((w.Balance+amount)*100) / 100
-		return tx.Model(&model.WarehouseWallet{}).
-			Where("account_id = ?", accountID).
-			Update("balance", newBalance).Error
+
+		flowNo, err := r.GenerateFlowNo(tx)
+		if err != nil {
+			return fmt.Errorf("生成流水号失败: %w", err)
+		}
+
+		return tx.Create(&model.WarehouseBillingRecord{
+			FlowNo:        flowNo,
+			AccountID:     accountID,
+			TradeUID:      fmt.Sprintf("RECHARGE-%d", rechargeID),
+			Type:          "recharge",
+			BusinessType:  "充值",
+			TotalAmount:   amount,
+			Status:        "success",
+			BalanceBefore: balanceBefore,
+			BalanceAfter:  balanceAfter,
+		}).Error
 	})
 }
 
@@ -176,6 +202,15 @@ func (r *WarehouseRepo) ListBillingRecords(req *model.WarehouseBillingListReq, a
 	if req.Keyword != "" {
 		kw := sqlutil.EscapeLike(req.Keyword)
 		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", kw, kw)
+	}
+	if req.ShopName != "" {
+		q = q.Where("shop_name = ?", req.ShopName)
+	}
+	if req.StartDate != "" {
+		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
+	}
+	if req.EndDate != "" {
+		q = q.Where("created_at <= ?", req.EndDate+" 23:59:59")
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

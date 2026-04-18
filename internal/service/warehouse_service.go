@@ -104,7 +104,7 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 		totalItems += item.Size
 	}
 
-	shippingFee := trade.PostFee
+	shippingFee := trade.PostCost
 	packingFee := calcPackingFee(totalItems)
 	totalAmount := math.Round((shippingFee+packingFee)*100) / 100
 
@@ -148,8 +148,10 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 				AccountID:     accountID,
 				TradeNo:       trade.TradeNo,
 				TradeUID:      trade.UID,
+				Platform:      trade.SourcePlatform,
 				ShopName:      trade.ShopName,
 				BusinessType:  "订单发货",
+				Type:          "deduct",
 				ShippingFee:   shippingFee,
 				PackingFee:    packingFee,
 				TotalAmount:   totalAmount,
