@@ -22,9 +22,16 @@ func makeFlowNo(prefix, sysShop, tradeNo string) string {
 	return fmt.Sprintf("%s%x", prefix, h[:6])
 }
 
-// platformFallback maps platform names to their fallback aliases for price lookup.
+// platformFallback maps order platform names to their price-table equivalents.
 var platformFallback = map[string]string{
 	"阿里巴巴": "1688",
+	"淘工厂":  "1688",
+	"抖店":   "1688",
+	"抖音供销": "1688",
+	"快手小店": "1688",
+	"小红书":  "1688",
+	"其他平台": "1688",
+	"SHOPEE_FMS": "1688",
 }
 
 // DeductCheckResult reports why an order can or cannot be审核'd right now.
@@ -351,29 +358,17 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	return nil
 }
 
-// CheckDeductible pre-evaluates whether an order can be审核'd right now.
-// Used by the auto-review and manual-mark paths to avoid pushing "已审核" to
-// WanLiNiu when the responsible account cannot cover the deduction.
-func (s *BillingService) CheckDeductible(sysShop, tradeUID, platform string) DeductCheckResult {
+// CheckAutoReviewEligible checks if an order can be auto-reviewed.
+// Approves if the shop is assigned to an employee and the product exists.
+// Balance is not checked here — billing deduction is a separate process.
+func (s *BillingService) CheckAutoReviewEligible(sysShop, tradeUID, platform string) DeductCheckResult {
 	accountID, err := s.resolveAccountID(sysShop)
 	if err != nil || accountID == 0 {
 		return DeductSkip
 	}
-	wallet, err := s.getOrSkipWallet(accountID)
-	if err != nil || wallet == nil {
-		return DeductSkip
-	}
-	cost, err := s.calculateOrderAmount(tradeUID, platform)
+	_, err = s.calculateOrderAmount(tradeUID, platform)
 	if err != nil {
 		return DeductBarcodeError
-	}
-	discountRate := wallet.DiscountRate
-	if discountRate == 0 {
-		discountRate = 0.85
-	}
-	actual := math.Round(cost*discountRate*100) / 100
-	if wallet.Balance < actual {
-		return DeductInsufficient
 	}
 	return DeductOK
 }

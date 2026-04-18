@@ -783,7 +783,7 @@ func (s *SyncService) BatchMarkOrdersWithBalanceCheck(items []model.MarkItem) (*
 			result.Skipped++
 			continue
 		}
-		switch s.billingService.CheckDeductible(trade.SysShop, trade.UID, trade.SourcePlatform) {
+		switch s.billingService.CheckAutoReviewEligible(trade.SysShop, trade.UID, trade.SourcePlatform) {
 		case DeductOK:
 			toPush = append(toPush, m)
 			approvedUIDs = append(approvedUIDs, trade.UID)
@@ -909,7 +909,7 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 	barcodeErrorUIDs := make([]string, 0)
 	for i := range candidates {
 		t := &candidates[i]
-		switch s.billingService.CheckDeductible(t.SysShop, t.UID, t.SourcePlatform) {
+		switch s.billingService.CheckAutoReviewEligible(t.SysShop, t.UID, t.SourcePlatform) {
 		case DeductOK:
 			approved = append(approved, approvedItem{
 				mark:  model.MarkItem{BillCode: t.TradeNo, MarkName: model.MarkApproved, Type: 0},
