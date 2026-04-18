@@ -17,7 +17,7 @@ type Account struct {
 	RealName    string    `json:"real_name" gorm:"type:varchar(64);not null;default:''"`
 	Role        uint8     `json:"role" gorm:"type:tinyint unsigned;not null"`
 	ParentID    *uint64   `json:"parent_id" gorm:"type:bigint unsigned;index;default:null;comment:直属上级账号ID"`
-	AutoReview  bool      `json:"auto_review" gorm:"type:tinyint(1);not null;default:0;index:idx_auto_review;comment:自动审核开关"`
+	AutoReview  bool      `json:"auto_review" gorm:"type:tinyint(1);not null;default:1;index:idx_auto_review;comment:自动审核开关"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
