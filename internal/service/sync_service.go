@@ -38,6 +38,8 @@ const autoReviewBatchSize = 10
 // leaving headroom for 30k+ orders per cycle.
 const autoReviewBatchDelay = 100 * time.Millisecond
 
+var wanLiNiuClient = &http.Client{Timeout: 30 * time.Second}
+
 type SyncService struct {
 	orderRepo      *repository.OrderRepo
 	shopRepo       *repository.ShopRepo
@@ -223,7 +225,7 @@ func (s *SyncService) fetchPage(page, limit int, startTime, endTime string) (map
 		form.Set(k, v)
 	}
 
-	resp, err := http.Post(
+	resp, err := wanLiNiuClient.Post(
 		s.cfg.BaseURL+tradeListPath,
 		"application/x-www-form-urlencoded",
 		strings.NewReader(form.Encode()),
@@ -669,7 +671,7 @@ func (s *SyncService) fetchReturnOrderPage(page, limit int, startTime, endTime s
 		form.Set(k, v)
 	}
 
-	resp, err := http.Post(
+	resp, err := wanLiNiuClient.Post(
 		s.cfg.BaseURL+returnOrderPath,
 		"application/x-www-form-urlencoded",
 		strings.NewReader(form.Encode()),
@@ -726,7 +728,7 @@ func (s *SyncService) BatchMarkOrders(items []model.MarkItem) error {
 		form.Set(k, v)
 	}
 
-	resp, err := http.Post(
+	resp, err := wanLiNiuClient.Post(
 		s.cfg.BaseURL+batchMarkPath,
 		"application/x-www-form-urlencoded",
 		strings.NewReader(form.Encode()),
@@ -922,6 +924,8 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 		log.Printf("[AutoReview] Account=%d no candidates found\n", account.ID)
 		return
 	}
+
+	log.Printf("[AutoReview] Account=%d checking %d candidates\n", account.ID, len(candidates))
 
 	// Step 4: balance-check each candidate
 	//   DeductOK          → push "已审核" to WanLiNiu
