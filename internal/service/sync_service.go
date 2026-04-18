@@ -30,6 +30,10 @@ const (
 // autoReviewBatchSize is the max orders per WanLiNiu batch-mark API call.
 const autoReviewBatchSize = 200
 
+// autoReviewBatchDelay is the pause between consecutive WanLiNiu batch-mark calls
+// within a single cycle, to avoid hitting ERP rate limits on large backlogs.
+const autoReviewBatchDelay = 500 * time.Millisecond
+
 type SyncService struct {
 	orderRepo      *repository.OrderRepo
 	shopRepo       *repository.ShopRepo
@@ -856,18 +860,12 @@ func (s *SyncService) StartAutoReview() {
 }
 
 func (s *SyncService) autoReviewOnce() {
-	accounts, err := s.accountRepo.ListAutoReviewAccounts()
+	accounts, err := s.accountRepo.ListEmployees()
 	if err != nil {
-		log.Printf("[AutoReview] ListAutoReviewAccounts error: %v\n", err)
+		log.Printf("[AutoReview] ListEmployees error: %v\n", err)
 		return
 	}
 	for i := range accounts {
-		// Only employees are allowed to run auto-review.
-		// SuperAdmin / TeamLead / Supervisor cover too broad a scope;
-		// auto-review is scoped to a single employee's own shops.
-		if accounts[i].Role != model.RoleEmployee {
-			continue
-		}
 		s.processAccountAutoReview(&accounts[i])
 	}
 }
@@ -942,6 +940,10 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 	// Step 5: call WanLiNiu in batches of autoReviewBatchSize, then update DB
 	now := time.Now()
 	for start := 0; start < len(approved); start += autoReviewBatchSize {
+		if start > 0 {
+			// Rate-limit WanLiNiu push between consecutive batches.
+			time.Sleep(autoReviewBatchDelay)
+		}
 		end := start + autoReviewBatchSize
 		if end > len(approved) {
 			end = len(approved)

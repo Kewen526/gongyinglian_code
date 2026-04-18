@@ -133,16 +133,6 @@ type ProductScopeResp struct {
 	HiddenFields []string `json:"hidden_fields"`
 }
 
-// ---------- Auto Review ----------
-
-type AutoReviewReq struct {
-	Enabled bool `json:"enabled"`
-}
-
-type AutoReviewResp struct {
-	Enabled bool `json:"enabled"`
-}
-
 type LoginReq struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`

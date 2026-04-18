@@ -304,18 +304,22 @@ func (r *OrderRepo) RecoverMarkToApproved(uid string, approvedAt time.Time) erro
 }
 
 // ListAutoReviewCandidates returns paid orders eligible for auto-review for the given sys_shop values.
-// Eligible = mark is empty (never audited) OR mark is "审核失败货号错误" (retry after product added).
-// Orders marked "已审核" or "余额不足扣款失败" are excluded.
-// Capped at 500 per call to bound memory usage and WanLiNiu batch size.
+// Eligible = mark is empty (never audited)
+//          | mark is "余额不足扣款失败" (retry after recharge)
+//          | mark is "审核失败货号错误" (retry after product added).
+// Orders marked "已审核" are excluded.
+// No row limit — every cycle audits all pending orders. WanLiNiu rate limiting
+// is handled at the batch push layer in sync_service.
 func (r *OrderRepo) ListAutoReviewCandidates(sysShops []string) ([]model.OrderTrade, error) {
 	if len(sysShops) == 0 {
 		return nil, nil
 	}
 	var trades []model.OrderTrade
 	err := r.db.
-		Where("sys_shop IN ? AND is_pay = ? AND (COALESCE(mark, '') = '' OR mark = ?)", sysShops, true, model.MarkBarcodeError).
+		Where("sys_shop IN ? AND is_pay = ? AND COALESCE(mark, '') IN ?",
+			sysShops, true,
+			[]string{"", model.MarkDeductFailed, model.MarkBarcodeError}).
 		Order("create_time_ms ASC").
-		Limit(500).
 		Find(&trades).Error
 	return trades, err
 }
