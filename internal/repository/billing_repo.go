@@ -403,7 +403,7 @@ func (r *BillingRepo) ListRechargeRequestsByAccountID(accountID uint64, page, pa
 // ListBillingRecords queries billing records with filters.
 // Insufficient-balance attempts are permanently excluded from the customer view.
 func (r *BillingRepo) ListBillingRecords(req *model.BillingListReq, accountID uint64) ([]model.BillingRecord, int64, error) {
-	q := r.db.Model(&model.BillingRecord{}).Where("account_id = ? AND status != 'insufficient' AND NOT (status = 'error' AND amount = 0)", accountID)
+	q := r.db.Model(&model.BillingRecord{}).Where("account_id = ? AND status != 'insufficient' AND NOT (status = 'error' AND actual_amount = 0)", accountID)
 
 	// Keyword: order number or flow_no
 	if req.Keyword != "" {
