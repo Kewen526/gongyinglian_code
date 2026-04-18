@@ -133,8 +133,46 @@ func (r *WarehouseRepo) GenerateFlowNo(tx *gorm.DB) (string, error) {
 
 // ---------- Queries ----------
 
-func (r *WarehouseRepo) ListBillingRecords(req *model.WarehouseBillingListReq, accountID uint64) ([]model.WarehouseBillingRecord, int64, error) {
-	q := r.db.Model(&model.WarehouseBillingRecord{}).Where("account_id = ?", accountID)
+func (r *WarehouseRepo) GetAccountShopIDs(accountID uint64) ([]uint64, error) {
+	var shopIDs []uint64
+	err := r.db.Table("account_shop").
+		Where("account_id = ?", accountID).
+		Pluck("shop_id", &shopIDs).Error
+	return shopIDs, err
+}
+
+func (r *WarehouseRepo) GetEmployeeAccountIDsByShopIDs(shopIDs []uint64) ([]uint64, error) {
+	if len(shopIDs) == 0 {
+		return nil, nil
+	}
+	var ids []uint64
+	err := r.db.Table("account_shop").
+		Select("DISTINCT account_shop.account_id").
+		Joins("JOIN account ON account.id = account_shop.account_id").
+		Where("account_shop.shop_id IN ? AND account.role = ?", shopIDs, model.RoleEmployee).
+		Pluck("account_shop.account_id", &ids).Error
+	return ids, err
+}
+
+func (r *WarehouseRepo) GetAllEmployeeAccountIDs() ([]uint64, error) {
+	var ids []uint64
+	err := r.db.Table("account").
+		Where("role = ?", model.RoleEmployee).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
+func (r *WarehouseRepo) GetWalletsByAccountIDs(accountIDs []uint64) ([]model.WarehouseWallet, error) {
+	if len(accountIDs) == 0 {
+		return nil, nil
+	}
+	var wallets []model.WarehouseWallet
+	err := r.db.Where("account_id IN ?", accountIDs).Find(&wallets).Error
+	return wallets, err
+}
+
+func (r *WarehouseRepo) ListBillingRecords(req *model.WarehouseBillingListReq, accountIDs []uint64) ([]model.WarehouseBillingRecord, int64, error) {
+	q := r.db.Model(&model.WarehouseBillingRecord{}).Where("account_id IN ?", accountIDs)
 	if req.Keyword != "" {
 		kw := sqlutil.EscapeLike(req.Keyword)
 		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", kw, kw)
@@ -155,8 +193,8 @@ func (r *WarehouseRepo) ListBillingRecords(req *model.WarehouseBillingListReq, a
 	return records, total, err
 }
 
-func (r *WarehouseRepo) ListRechargeRequestsByAccountID(accountID uint64, page, pageSize int) ([]model.WarehouseRechargeRequest, int64, error) {
-	q := r.db.Model(&model.WarehouseRechargeRequest{}).Where("account_id = ?", accountID)
+func (r *WarehouseRepo) ListRechargeRequestsByAccountIDs(accountIDs []uint64, page, pageSize int) ([]model.WarehouseRechargeRequest, int64, error) {
+	q := r.db.Model(&model.WarehouseRechargeRequest{}).Where("account_id IN ?", accountIDs)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err

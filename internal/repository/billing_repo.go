@@ -380,11 +380,51 @@ func (r *BillingRepo) GetAllBillingRecordsForExport(req *model.AdminBillingListR
 	return records, err
 }
 
+// ---------- Role-aware helpers ----------
+
+func (r *BillingRepo) GetAccountShopIDs(accountID uint64) ([]uint64, error) {
+	var shopIDs []uint64
+	err := r.db.Table("account_shop").
+		Where("account_id = ?", accountID).
+		Pluck("shop_id", &shopIDs).Error
+	return shopIDs, err
+}
+
+func (r *BillingRepo) GetEmployeeAccountIDsByShopIDs(shopIDs []uint64) ([]uint64, error) {
+	if len(shopIDs) == 0 {
+		return nil, nil
+	}
+	var ids []uint64
+	err := r.db.Table("account_shop").
+		Select("DISTINCT account_shop.account_id").
+		Joins("JOIN account ON account.id = account_shop.account_id").
+		Where("account_shop.shop_id IN ? AND account.role = ?", shopIDs, model.RoleEmployee).
+		Pluck("account_shop.account_id", &ids).Error
+	return ids, err
+}
+
+func (r *BillingRepo) GetAllEmployeeAccountIDs() ([]uint64, error) {
+	var ids []uint64
+	err := r.db.Table("account").
+		Where("role = ?", model.RoleEmployee).
+		Pluck("id", &ids).Error
+	return ids, err
+}
+
+func (r *BillingRepo) GetWalletsByAccountIDs(accountIDs []uint64) ([]model.Wallet, error) {
+	if len(accountIDs) == 0 {
+		return nil, nil
+	}
+	var wallets []model.Wallet
+	err := r.db.Where("account_id IN ?", accountIDs).Find(&wallets).Error
+	return wallets, err
+}
+
 // ---------- Employee: Own Recharge Records ----------
 
-// ListRechargeRequestsByAccountID returns the recharge history for one account.
-func (r *BillingRepo) ListRechargeRequestsByAccountID(accountID uint64, page, pageSize int) ([]model.RechargeRequest, int64, error) {
-	q := r.db.Model(&model.RechargeRequest{}).Where("account_id = ?", accountID)
+// ListRechargeRequestsByAccountIDs returns the recharge history for the given accounts.
+func (r *BillingRepo) ListRechargeRequestsByAccountIDs(accountIDs []uint64, page, pageSize int) ([]model.RechargeRequest, int64, error) {
+	q := r.db.Model(&model.RechargeRequest{}).Where("account_id IN ?", accountIDs)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -402,8 +442,8 @@ func (r *BillingRepo) ListRechargeRequestsByAccountID(accountID uint64, page, pa
 
 // ListBillingRecords queries billing records with filters.
 // Insufficient-balance attempts are permanently excluded from the customer view.
-func (r *BillingRepo) ListBillingRecords(req *model.BillingListReq, accountID uint64) ([]model.BillingRecord, int64, error) {
-	q := r.db.Model(&model.BillingRecord{}).Where("account_id = ? AND status != 'insufficient' AND NOT (status = 'error' AND actual_amount = 0)", accountID)
+func (r *BillingRepo) ListBillingRecords(req *model.BillingListReq, accountIDs []uint64) ([]model.BillingRecord, int64, error) {
+	q := r.db.Model(&model.BillingRecord{}).Where("account_id IN ? AND status != 'insufficient' AND NOT (status = 'error' AND actual_amount = 0)", accountIDs)
 
 	// Keyword: order number or flow_no
 	if req.Keyword != "" {
@@ -461,8 +501,8 @@ func (r *BillingRepo) ListBillingRecords(req *model.BillingListReq, accountID ui
 
 // GetBillingRecordsForExport returns all records matching the same filters as
 // ListBillingRecords but without pagination (for Excel export).
-func (r *BillingRepo) GetBillingRecordsForExport(req *model.BillingListReq, accountID uint64) ([]model.BillingRecord, error) {
-	q := r.db.Model(&model.BillingRecord{}).Where("account_id = ? AND status != 'insufficient' AND NOT (status = 'error' AND actual_amount = 0)", accountID)
+func (r *BillingRepo) GetBillingRecordsForExport(req *model.BillingListReq, accountIDs []uint64) ([]model.BillingRecord, error) {
+	q := r.db.Model(&model.BillingRecord{}).Where("account_id IN ? AND status != 'insufficient' AND NOT (status = 'error' AND actual_amount = 0)", accountIDs)
 
 	if req.Keyword != "" {
 		kw := sqlutil.EscapeLike(req.Keyword)

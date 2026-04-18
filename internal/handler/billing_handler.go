@@ -16,10 +16,17 @@ func NewBillingHandler(billingSvc *service.BillingService) *BillingHandler {
 	return &BillingHandler{billingSvc: billingSvc}
 }
 
+func getRole(c *gin.Context) uint8 {
+	role, _ := c.Get("role")
+	r, _ := role.(uint8)
+	return r
+}
+
 // GET /api/v1/billing/wallet
 func (h *BillingHandler) GetWallet(c *gin.Context) {
 	accountID := c.GetUint64("account_id")
-	wallet, err := h.billingSvc.GetWallet(accountID)
+	role := getRole(c)
+	wallet, err := h.billingSvc.GetWallet(accountID, role)
 	if err != nil {
 		response.InternalError(c, "查询钱包失败")
 		return
@@ -29,6 +36,11 @@ func (h *BillingHandler) GetWallet(c *gin.Context) {
 
 // POST /api/v1/billing/recharge
 func (h *BillingHandler) SubmitRecharge(c *gin.Context) {
+	role := getRole(c)
+	if role != model.RoleEmployee {
+		response.Forbidden(c, "仅员工可提交充值申请")
+		return
+	}
 	accountID := c.GetUint64("account_id")
 	var req model.SubmitRechargeReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -45,12 +57,13 @@ func (h *BillingHandler) SubmitRecharge(c *gin.Context) {
 // GET /api/v1/billing
 func (h *BillingHandler) ListBillingRecords(c *gin.Context) {
 	accountID := c.GetUint64("account_id")
+	role := getRole(c)
 	var req model.BillingListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
 		response.BadRequest(c, "参数错误")
 		return
 	}
-	result, err := h.billingSvc.ListBillingRecords(accountID, &req)
+	result, err := h.billingSvc.ListBillingRecords(accountID, role, &req)
 	if err != nil {
 		response.InternalError(c, "查询失败")
 		return
@@ -61,12 +74,13 @@ func (h *BillingHandler) ListBillingRecords(c *gin.Context) {
 // GET /api/v1/billing/export
 func (h *BillingHandler) ExportBillingRecords(c *gin.Context) {
 	accountID := c.GetUint64("account_id")
+	role := getRole(c)
 	var req model.BillingListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
 		response.BadRequest(c, "参数错误")
 		return
 	}
-	data, err := h.billingSvc.ExportMyBillingRecords(accountID, &req)
+	data, err := h.billingSvc.ExportMyBillingRecords(accountID, role, &req)
 	if err != nil {
 		response.InternalError(c, "导出失败")
 		return
@@ -78,12 +92,13 @@ func (h *BillingHandler) ExportBillingRecords(c *gin.Context) {
 // GET /api/v1/billing/recharge-records
 func (h *BillingHandler) ListMyRechargeRecords(c *gin.Context) {
 	accountID := c.GetUint64("account_id")
+	role := getRole(c)
 	var req model.MyRechargeListReq
 	if err := c.ShouldBindQuery(&req); err != nil {
 		response.BadRequest(c, "参数错误")
 		return
 	}
-	result, err := h.billingSvc.ListMyRechargeRecords(accountID, &req)
+	result, err := h.billingSvc.ListMyRechargeRecords(accountID, role, &req)
 	if err != nil {
 		response.InternalError(c, "查询失败")
 		return
