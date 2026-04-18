@@ -117,7 +117,6 @@ func SetupRouter(
 		orderView.GET("/orders", orderHandler.ListOrders)
 		orderView.GET("/orders/:id", orderHandler.GetOrderDetail)
 		orderView.GET("/orders/status-options", orderHandler.GetStatusOptions)
-		orderView.GET("/orders/auto-review", accountHandler.GetAutoReviewStatus)
 	}
 
 	// --- Order: edit permission (sync, batch update, mark) ---
@@ -127,7 +126,6 @@ func SetupRouter(
 		orderEdit.POST("/orders/sync", orderHandler.SyncOrders)
 		orderEdit.PATCH("/orders/batch-update", orderHandler.BatchUpdateOrders)
 		orderEdit.POST("/orders/mark", orderHandler.BatchMarkOrders)
-		orderEdit.PUT("/orders/auto-review", accountHandler.SetAutoReviewStatus)
 	}
 
 	// --- Shop/Platform queries (any logged-in user with order view) ---

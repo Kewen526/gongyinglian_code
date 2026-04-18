@@ -196,34 +196,6 @@ func (h *AccountHandler) SaveProductScope(c *gin.Context) {
 	response.Success(c, nil)
 }
 
-// GET /api/v1/orders/auto-review — returns the calling account's auto-review status
-func (h *AccountHandler) GetAutoReviewStatus(c *gin.Context) {
-	aid := c.GetUint64("account_id")
-
-	enabled, err := h.svc.GetAutoReview(aid)
-	if err != nil {
-		response.InternalError(c, "获取自动审核状态失败")
-		return
-	}
-	response.Success(c, model.AutoReviewResp{Enabled: enabled})
-}
-
-// PUT /api/v1/orders/auto-review — toggles the calling account's auto-review switch
-func (h *AccountHandler) SetAutoReviewStatus(c *gin.Context) {
-	aid := c.GetUint64("account_id")
-
-	var req model.AutoReviewReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "参数错误: "+err.Error())
-		return
-	}
-	if err := h.svc.SetAutoReview(aid, req.Enabled); err != nil {
-		response.InternalError(c, "更新自动审核状态失败")
-		return
-	}
-	response.Success(c, model.AutoReviewResp{Enabled: req.Enabled})
-}
-
 // PUT /api/v1/accounts/:id/permissions
 func (h *AccountHandler) UpdatePermissions(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)

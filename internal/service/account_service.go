@@ -491,28 +491,6 @@ func (s *AccountService) validateScopeSubset(callerID uint64, suppliers, tags []
 	return nil
 }
 
-// GetAutoReview returns whether auto-review is enabled for an account.
-func (s *AccountService) GetAutoReview(accountID uint64) (bool, error) {
-	account, err := s.repo.GetByID(accountID)
-	if err != nil {
-		return false, err
-	}
-	return account.AutoReview, nil
-}
-
-// SetAutoReview enables or disables auto-review for an account.
-// Only employees (RoleEmployee) are permitted to use this feature.
-func (s *AccountService) SetAutoReview(accountID uint64, enabled bool) error {
-	account, err := s.repo.GetByID(accountID)
-	if err != nil {
-		return err
-	}
-	if account.Role != model.RoleEmployee {
-		return errors.New("只有员工账号可以开启自动审核")
-	}
-	return s.repo.SetAutoReview(accountID, enabled)
-}
-
 // UpdatePermissions replaces permissions with hierarchy and subset validation.
 func (s *AccountService) UpdatePermissions(accountID uint64, req *model.UpdatePermissionsReq, callerID uint64, callerRole uint8) error {
 	// Hierarchy check

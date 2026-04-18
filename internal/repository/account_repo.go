@@ -171,16 +171,11 @@ func (r *AccountRepo) SaveProductScope(accountID uint64, suppliers, tags, hidden
 	}).Error
 }
 
-// SetAutoReview updates the auto_review flag for an account.
-func (r *AccountRepo) SetAutoReview(accountID uint64, enabled bool) error {
-	return r.db.Model(&model.Account{}).Where("id = ?", accountID).Update("auto_review", enabled).Error
-}
-
-// ListAutoReviewAccounts returns all accounts that have auto_review=true.
-// Uses idx_auto_review index for fast lookup.
-func (r *AccountRepo) ListAutoReviewAccounts() ([]model.Account, error) {
+// ListEmployees returns all accounts with role = RoleEmployee.
+// Every employee is an auto-review participant — there is no opt-in switch.
+func (r *AccountRepo) ListEmployees() ([]model.Account, error) {
 	var accounts []model.Account
-	err := r.db.Where("auto_review = 1").Find(&accounts).Error
+	err := r.db.Where("role = ?", model.RoleEmployee).Find(&accounts).Error
 	return accounts, err
 }
 
