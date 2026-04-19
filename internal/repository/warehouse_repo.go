@@ -228,6 +228,26 @@ func (r *WarehouseRepo) ListBillingRecords(req *model.WarehouseBillingListReq, a
 	return records, total, err
 }
 
+func (r *WarehouseRepo) GetBillingRecordsForExport(req *model.WarehouseBillingListReq, accountIDs []uint64) ([]model.WarehouseBillingRecord, error) {
+	q := r.db.Model(&model.WarehouseBillingRecord{}).Where("account_id IN ?", accountIDs)
+	if req.Keyword != "" {
+		kw := sqlutil.EscapeLike(req.Keyword)
+		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", kw, kw)
+	}
+	if req.ShopName != "" {
+		q = q.Where("shop_name = ?", req.ShopName)
+	}
+	if req.StartDate != "" {
+		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
+	}
+	if req.EndDate != "" {
+		q = q.Where("created_at <= ?", req.EndDate+" 23:59:59")
+	}
+	var records []model.WarehouseBillingRecord
+	err := q.Order("created_at DESC").Find(&records).Error
+	return records, err
+}
+
 func (r *WarehouseRepo) ListRechargeRequestsByAccountIDs(accountIDs []uint64, page, pageSize int) ([]model.WarehouseRechargeRequest, int64, error) {
 	q := r.db.Model(&model.WarehouseRechargeRequest{}).Where("account_id IN ?", accountIDs)
 	var total int64

@@ -270,6 +270,26 @@ func (s *WarehouseService) SubmitRecharge(accountID uint64, req *model.Warehouse
 	})
 }
 
+func (s *WarehouseService) ExportBillingRecords(accountID uint64, role uint8, req *model.WarehouseBillingListReq) ([]byte, error) {
+	accountIDs, err := s.resolveEffectiveAccountIDs(accountID, role)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.repo.GetBillingRecordsForExport(req, accountIDs)
+	if err != nil {
+		return nil, err
+	}
+	if role != model.RoleEmployee {
+		ids := make([]uint64, 0, len(records))
+		for _, r := range records {
+			ids = append(ids, r.AccountID)
+		}
+		accountMap, _ := s.repo.GetAccountInfoByIDs(ids)
+		return buildWarehouseExcel(records, accountMap)
+	}
+	return buildMyWarehouseExcel(records)
+}
+
 func (s *WarehouseService) ListBillingRecords(accountID uint64, role uint8, req *model.WarehouseBillingListReq) (*model.WarehouseBillingListResp, error) {
 	accountIDs, err := s.resolveEffectiveAccountIDs(accountID, role)
 	if err != nil {

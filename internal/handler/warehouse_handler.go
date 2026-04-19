@@ -45,6 +45,24 @@ func (h *WarehouseHandler) ListBillingRecords(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// GET /api/v1/warehouse/billing/export
+func (h *WarehouseHandler) ExportBillingRecords(c *gin.Context) {
+	accountID := c.GetUint64("account_id")
+	role := getRole(c)
+	var req model.WarehouseBillingListReq
+	if err := c.ShouldBindQuery(&req); err != nil {
+		response.BadRequest(c, "参数错误: "+err.Error())
+		return
+	}
+	data, err := h.svc.ExportBillingRecords(accountID, role, &req)
+	if err != nil {
+		response.InternalError(c, "导出失败")
+		return
+	}
+	c.Header("Content-Disposition", "attachment; filename=warehouse_billing.xlsx")
+	c.Data(200, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data)
+}
+
 // POST /api/v1/warehouse/recharge
 func (h *WarehouseHandler) SubmitRecharge(c *gin.Context) {
 	role := getRole(c)
