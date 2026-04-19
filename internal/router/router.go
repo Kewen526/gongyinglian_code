@@ -153,6 +153,7 @@ func SetupRouter(
 		warehouseGroup.GET("/warehouse/billing", warehouseHandler.ListBillingRecords)
 		warehouseGroup.POST("/warehouse/recharge", warehouseHandler.SubmitRecharge)
 		warehouseGroup.GET("/warehouse/recharge-records", warehouseHandler.ListMyRechargeRecords)
+		warehouseGroup.GET("/warehouse/billing/export", warehouseHandler.ExportBillingRecords)
 	}
 
 	// --- Admin Finance Center (super admin only) ---
