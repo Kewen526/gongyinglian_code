@@ -43,8 +43,8 @@ type Wallet struct {
 	ID                uint64    `json:"id" gorm:"primaryKey;autoIncrement"`
 	AccountID         uint64    `json:"account_id" gorm:"not null;uniqueIndex;comment:账号ID"`
 	Balance           float64   `json:"balance" gorm:"type:decimal(12,2);default:0;comment:可用余额"`
-	DiscountRate      float64   `json:"discount_rate" gorm:"type:decimal(4,2);default:0.85;comment:当前折扣率"`
-	Level             string    `json:"level" gorm:"type:varchar(8);default:'V1';comment:等级"`
+	DiscountRate      float64   `json:"discount_rate" gorm:"type:decimal(4,2);default:1;comment:当前折扣率，1.0=无折扣"`
+	Level             string    `json:"level" gorm:"type:varchar(8);default:'';comment:等级"`
 	LastMonthSpending float64   `json:"last_month_spending" gorm:"type:decimal(12,2);default:0;comment:上月消费总额"`
 	BalanceSnapshot   float64   `json:"balance_snapshot" gorm:"type:decimal(12,2);default:0;comment:本月1号0点余额快照"`
 	CreatedAt         time.Time `json:"created_at"`
