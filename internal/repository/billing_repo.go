@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type BillingRepo struct {
@@ -24,6 +25,19 @@ func NewBillingRepo(db *gorm.DB) *BillingRepo {
 func (r *BillingRepo) GetWalletByAccountID(accountID uint64) (*model.Wallet, error) {
 	var w model.Wallet
 	err := r.db.Where("account_id = ?", accountID).First(&w).Error
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+// GetWalletByAccountIDForUpdate fetches a wallet within a transaction with a SELECT ... FOR UPDATE
+// row lock so concurrent deductions / recharges / refunds serialize on the same row instead of
+// reading stale balances and overwriting each other (lost update).
+func (r *BillingRepo) GetWalletByAccountIDForUpdate(tx *gorm.DB, accountID uint64) (*model.Wallet, error) {
+	var w model.Wallet
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("account_id = ?", accountID).First(&w).Error
 	if err != nil {
 		return nil, err
 	}
@@ -131,28 +145,29 @@ func (r *BillingRepo) GetDeductionRecord(flowNo string) (*model.BillingRecord, e
 // ProcessRefund credits the wallet and creates a refund billing record in a single transaction.
 // Also updates order billing_status to BillingStatusRefunded(4).
 func (r *BillingRepo) ProcessRefund(accountID uint64, tradeUID, tradeNo, platform, shopName, flowNo string, amount float64, markApprovedAt *time.Time) error {
-	wallet, err := r.GetWalletByAccountID(accountID)
-	if err != nil {
-		return fmt.Errorf("get wallet: %w", err)
-	}
-	newBalance := math.Round((wallet.Balance+amount)*100) / 100
-
-	rec := &model.BillingRecord{
-		FlowNo:         flowNo,
-		AccountID:      accountID,
-		TradeNo:        tradeNo,
-		TradeUID:       tradeUID,
-		Platform:       platform,
-		ShopName:       shopName,
-		Type:           "refund",
-		ActualAmount:   amount,
-		Status:         "success",
-		BalanceBefore:  wallet.Balance,
-		BalanceAfter:   newBalance,
-		MarkApprovedAt: markApprovedAt,
-	}
-
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		// FOR UPDATE so this refund serializes with concurrent deductions / recharges on the same wallet.
+		w, err := r.GetWalletByAccountIDForUpdate(tx, accountID)
+		if err != nil {
+			return fmt.Errorf("get wallet: %w", err)
+		}
+		newBalance := math.Round((w.Balance+amount)*100) / 100
+
+		rec := &model.BillingRecord{
+			FlowNo:         flowNo,
+			AccountID:      accountID,
+			TradeNo:        tradeNo,
+			TradeUID:       tradeUID,
+			Platform:       platform,
+			ShopName:       shopName,
+			Type:           "refund",
+			ActualAmount:   amount,
+			Status:         "success",
+			BalanceBefore:  w.Balance,
+			BalanceAfter:   newBalance,
+			MarkApprovedAt: markApprovedAt,
+		}
+
 		if err := r.CreateBillingRecord(tx, rec); err != nil {
 			return err
 		}
@@ -241,10 +256,11 @@ func (r *BillingRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amoun
 			return errors.New("该充值申请已处理或不存在")
 		}
 
-		// Get or create wallet
+		// Get or create wallet (FOR UPDATE locks the row so concurrent deduct/refund/recharge serialize)
 		var balanceBefore, balanceAfter float64
 		var w model.Wallet
-		err := tx.Where("account_id = ?", accountID).First(&w).Error
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("account_id = ?", accountID).First(&w).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			balanceBefore = 0
 			balanceAfter = math.Round(amount*100) / 100

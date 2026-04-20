@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type WarehouseRepo struct {
@@ -26,6 +27,19 @@ func (r *WarehouseRepo) DB() *gorm.DB { return r.db }
 func (r *WarehouseRepo) GetWalletByAccountID(accountID uint64) (*model.WarehouseWallet, error) {
 	var w model.WarehouseWallet
 	err := r.db.Where("account_id = ?", accountID).First(&w).Error
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+// GetWalletByAccountIDForUpdate fetches a wallet within a transaction with a SELECT ... FOR UPDATE
+// row lock so concurrent deductions / recharges serialize on the same row instead of reading
+// stale balances and overwriting each other (lost update).
+func (r *WarehouseRepo) GetWalletByAccountIDForUpdate(tx *gorm.DB, accountID uint64) (*model.WarehouseWallet, error) {
+	var w model.WarehouseWallet
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("account_id = ?", accountID).First(&w).Error
 	if err != nil {
 		return nil, err
 	}
@@ -70,9 +84,11 @@ func (r *WarehouseRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amo
 			return errors.New("该充值申请已处理或不存在")
 		}
 
+		// FOR UPDATE so this serializes with concurrent deductions on the same wallet.
 		var balanceBefore, balanceAfter float64
 		var w model.WarehouseWallet
-		err := tx.Where("account_id = ?", accountID).First(&w).Error
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("account_id = ?", accountID).First(&w).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			balanceBefore = 0
 			balanceAfter = math.Round(amount*100) / 100

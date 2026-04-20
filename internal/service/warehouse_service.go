@@ -128,16 +128,29 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 		return nil
 	}
 
-	// Deduct in transaction
-	newBalance := math.Round((wallet.Balance-totalAmount)*100) / 100
 	tradeTime := time.Now()
 	if trade.SendTimeMs > 0 {
 		tradeTime = time.UnixMilli(trade.SendTimeMs)
 	}
 
+	// Deduct in transaction with row lock so concurrent deductions / recharges on the same
+	// wallet serialize. Without the lock, multiple goroutines read the same stale balance
+	// and overwrite each other (lost update).
+	var insufficientAfterLock bool
 	var txErr error
 	for attempt := 0; attempt < 5; attempt++ {
+		insufficientAfterLock = false
 		txErr = s.repo.DB().Transaction(func(tx *gorm.DB) error {
+			w, err := s.repo.GetWalletByAccountIDForUpdate(tx, accountID)
+			if err != nil {
+				return err
+			}
+			if w.Balance < totalAmount {
+				insufficientAfterLock = true
+				return nil
+			}
+			newBalance := math.Round((w.Balance-totalAmount)*100) / 100
+
 			flowNo, err := s.repo.GenerateFlowNo(tx)
 			if err != nil {
 				return fmt.Errorf("生成流水号失败: %w", err)
@@ -156,7 +169,7 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 				PackingFee:    packingFee,
 				TotalAmount:   totalAmount,
 				ItemCount:     totalItems,
-				BalanceBefore: wallet.Balance,
+				BalanceBefore: w.Balance,
 				BalanceAfter:  newBalance,
 				Status:        "success",
 				TradeTime:     tradeTime,
@@ -177,6 +190,11 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 	}
 	if txErr != nil {
 		return txErr
+	}
+	if insufficientAfterLock {
+		log.Printf("[Warehouse] Insufficient balance after lock for trade=%s: need=%.2f\n", trade.TradeNo, totalAmount)
+		_ = s.repo.UpdateWarehouseStatus(trade.UID, model.WarehouseStatusInsufficient)
+		return nil
 	}
 
 	_ = s.repo.UpdateWarehouseStatus(trade.UID, model.WarehouseStatusSuccess)

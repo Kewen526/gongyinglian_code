@@ -303,22 +303,33 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	rec.DiscountRate = discountRate
 	rec.DiscountAmount = discount
 	rec.ActualAmount = actual
-	rec.BalanceBefore = wallet.Balance
 
 	if wallet.Balance < actual {
-		// Balance insufficient: flip mark to "余额不足扣款失败" and set billing_status.
+		// Fast-path insufficient: flip mark to "余额不足扣款失败" and set billing_status.
 		// No billing record is created — keeps the customer billing view clean.
 		// No WanLiNiu push on this path (mark is a frontend-only display for this state).
 		_ = s.orderRepo.SetMarkDeductFailed(trade.UID)
 		return nil
 	}
 
-	// Deduct in transaction
-	newBalance := math.Round((wallet.Balance-actual)*100) / 100
+	// Deduct in transaction with row lock so concurrent deductions / refunds / recharges
+	// on the same wallet serialize. Without the lock, multiple goroutines read the same
+	// stale balance and overwrite each other (lost update).
 	rec.Status = "success"
-	rec.BalanceAfter = newBalance
 
+	var insufficientAfterLock bool
 	txErr := s.billingRepo.DB().Transaction(func(tx *gorm.DB) error {
+		w, err := s.billingRepo.GetWalletByAccountIDForUpdate(tx, accountID)
+		if err != nil {
+			return err
+		}
+		if w.Balance < actual {
+			insufficientAfterLock = true
+			return nil
+		}
+		newBalance := math.Round((w.Balance-actual)*100) / 100
+		rec.BalanceBefore = w.Balance
+		rec.BalanceAfter = newBalance
 		if err := s.billingRepo.CreateBillingRecord(tx, rec); err != nil {
 			return err
 		}
@@ -326,6 +337,10 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	})
 	if txErr != nil {
 		return txErr
+	}
+	if insufficientAfterLock {
+		_ = s.orderRepo.SetMarkDeductFailed(trade.UID)
+		return nil
 	}
 	if err := s.orderRepo.UpdateBillingStatus(trade.UID, model.BillingStatusSuccess); err != nil {
 		return err
