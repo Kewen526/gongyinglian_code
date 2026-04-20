@@ -53,7 +53,7 @@ type WarehouseBillingRecord struct {
 	BalanceBefore float64   `json:"balance_before" gorm:"type:decimal(12,2);default:0;comment:扣前余额"`
 	BalanceAfter  float64   `json:"balance_after" gorm:"type:decimal(12,2);default:0;comment:扣后余额"`
 	Status        string    `json:"status" gorm:"type:varchar(16);comment:success/insufficient"`
-	TradeTime     time.Time `json:"trade_time" gorm:"comment:交易时间(发货时间)"`
+	TradeTime     *time.Time `json:"trade_time" gorm:"comment:交易时间(发货时间)"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

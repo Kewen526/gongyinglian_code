@@ -172,7 +172,7 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 				BalanceBefore: w.Balance,
 				BalanceAfter:  newBalance,
 				Status:        "success",
-				TradeTime:     tradeTime,
+				TradeTime:     &tradeTime,
 			}
 
 			if err := s.repo.CreateBillingRecord(tx, rec); err != nil {
