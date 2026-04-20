@@ -206,6 +206,9 @@ func (r *WarehouseRepo) ListBillingRecords(req *model.WarehouseBillingListReq, a
 	if req.ShopName != "" {
 		q = q.Where("shop_name = ?", req.ShopName)
 	}
+	if req.Type != "" {
+		q = q.Where("type = ?", req.Type)
+	}
 	if req.StartDate != "" {
 		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
 	}
@@ -236,6 +239,9 @@ func (r *WarehouseRepo) GetBillingRecordsForExport(req *model.WarehouseBillingLi
 	}
 	if req.ShopName != "" {
 		q = q.Where("shop_name = ?", req.ShopName)
+	}
+	if req.Type != "" {
+		q = q.Where("type = ?", req.Type)
 	}
 	if req.StartDate != "" {
 		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")
@@ -315,6 +321,9 @@ func (r *WarehouseRepo) ListAllBillingRecords(req *model.WarehouseAdminBillingLi
 	if req.Keyword != "" {
 		kw := sqlutil.EscapeLike(req.Keyword)
 		q = q.Where("trade_no LIKE ? OR flow_no LIKE ?", kw, kw)
+	}
+	if req.Type != "" {
+		q = q.Where("type = ?", req.Type)
 	}
 	if req.StartDate != "" {
 		q = q.Where("created_at >= ?", req.StartDate+" 00:00:00")

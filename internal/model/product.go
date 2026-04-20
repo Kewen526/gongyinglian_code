@@ -224,6 +224,7 @@ type ProductListReq struct {
 	Status      *uint8   `form:"status"`     // optional status filter
 	StartDate   string   `form:"start_date"`
 	EndDate     string   `form:"end_date"`
+	Page        int      `form:"page"`
 	PageSize    int      `form:"page_size"`
 	// search_after cursor fields for ES pagination (named generically)
 	SearchAfterCode string `form:"search_after_code"`
