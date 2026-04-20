@@ -87,6 +87,16 @@ func (r *BillingRepo) GetLastMonthSpending(accountID uint64) (float64, error) {
 	return total, err
 }
 
+// LockDiscountInTx updates discount_rate and level within an existing transaction.
+// Used to atomically lock the first-deduction discount alongside the deduction itself.
+func (r *BillingRepo) LockDiscountInTx(tx *gorm.DB, accountID uint64, rate float64, level string) error {
+	return tx.Model(&model.Wallet{}).Where("account_id = ?", accountID).
+		Updates(map[string]interface{}{
+			"discount_rate": rate,
+			"level":         level,
+		}).Error
+}
+
 // GetCurrentMonthRechargeTotal sums approved recharges for the current month (new-account discount).
 func (r *BillingRepo) GetCurrentMonthRechargeTotal(accountID uint64) (float64, error) {
 	now := time.Now()

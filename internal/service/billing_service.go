@@ -193,15 +193,16 @@ func (s *BillingService) refreshDiscounts() {
 	}
 	for _, w := range wallets {
 		spending, _ := s.billingRepo.GetLastMonthSpending(w.AccountID)
-		spendRate, spendLevel := model.CalcDiscount(spending)
-		balRate, balLevel := model.CalcDiscount(w.Balance)
-
-		// Take the better discount (lower rate number = more discount)
-		rate, level := spendRate, spendLevel
-		if balRate < spendRate {
-			rate, level = balRate, balLevel
+		var rate float64
+		var level string
+		if spending > 0 {
+			// Last month had consumption: lock discount based on spending tier.
+			rate, level = model.CalcDiscount(spending)
+		} else {
+			// No consumption last month: reset to no-discount; will be re-calculated
+			// from current month recharge total on the first deduction.
+			rate, level = 1.0, ""
 		}
-
 		_ = s.billingRepo.UpdateWalletDiscount(w.AccountID, rate, level, w.Balance, spending)
 		log.Printf("[Billing] AccountID=%d level=%s rate=%.2f\n", w.AccountID, level, rate)
 	}
@@ -291,23 +292,24 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 		return nil
 	}
 
-	// Apply discount
-	discountRate := wallet.DiscountRate
-	if discountRate == 0 {
-		discountRate = 0.85
+	// Resolve effective discount rate. If wallet has no locked discount yet (rate >= 1.0),
+	// calculate from current month's total approved recharge. This gives a preview for
+	// the fast-path balance check; the actual locking happens inside the transaction.
+	previewRate := wallet.DiscountRate
+	if previewRate <= 0 || previewRate >= 1.0 {
+		monthRecharge, _ := s.billingRepo.GetCurrentMonthRechargeTotal(accountID)
+		if monthRecharge > 0 {
+			previewRate, _ = model.CalcDiscount(monthRecharge)
+		} else {
+			previewRate = 1.0
+		}
 	}
-	actual := math.Round(originalAmount*discountRate*100) / 100
-	discount := math.Round((originalAmount-actual)*100) / 100
+	previewActual := math.Round(originalAmount*previewRate*100) / 100
 
 	rec.OriginalAmount = originalAmount
-	rec.DiscountRate = discountRate
-	rec.DiscountAmount = discount
-	rec.ActualAmount = actual
 
-	if wallet.Balance < actual {
-		// Fast-path insufficient: flip mark to "余额不足扣款失败" and set billing_status.
-		// No billing record is created — keeps the customer billing view clean.
-		// No WanLiNiu push on this path (mark is a frontend-only display for this state).
+	if wallet.Balance < previewActual {
+		// Fast-path insufficient check (uses preview rate — conservative but safe).
 		_ = s.orderRepo.SetMarkDeductFailed(trade.UID)
 		return nil
 	}
@@ -323,11 +325,32 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 		if err != nil {
 			return err
 		}
+
+		// Re-resolve and lock discount inside the row lock so the first deduction
+		// atomically writes the discount together with the balance update.
+		effectiveRate := w.DiscountRate
+		if effectiveRate <= 0 || effectiveRate >= 1.0 {
+			monthRecharge, _ := s.billingRepo.GetCurrentMonthRechargeTotal(accountID)
+			if monthRecharge > 0 {
+				var level string
+				effectiveRate, level = model.CalcDiscount(monthRecharge)
+				if err := s.billingRepo.LockDiscountInTx(tx, accountID, effectiveRate, level); err != nil {
+					return fmt.Errorf("lock discount: %w", err)
+				}
+			} else {
+				effectiveRate = 1.0
+			}
+		}
+
+		actual := math.Round(originalAmount*effectiveRate*100) / 100
 		if w.Balance < actual {
 			insufficientAfterLock = true
 			return nil
 		}
 		newBalance := math.Round((w.Balance-actual)*100) / 100
+		rec.DiscountRate = effectiveRate
+		rec.DiscountAmount = math.Round((originalAmount-actual)*100) / 100
+		rec.ActualAmount = actual
 		rec.BalanceBefore = w.Balance
 		rec.BalanceAfter = newBalance
 		if err := s.billingRepo.CreateBillingRecord(tx, rec); err != nil {
@@ -392,8 +415,13 @@ func (s *BillingService) CheckAutoReviewEligible(sysShop, tradeUID string) Deduc
 		return DeductInsufficient
 	}
 	discountRate := wallet.DiscountRate
-	if discountRate == 0 {
-		discountRate = 0.85
+	if discountRate <= 0 || discountRate >= 1.0 {
+		monthRecharge, _ := s.billingRepo.GetCurrentMonthRechargeTotal(accountID)
+		if monthRecharge > 0 {
+			discountRate, _ = model.CalcDiscount(monthRecharge)
+		} else {
+			discountRate = 1.0
+		}
 	}
 	actual := math.Round(cost*discountRate*100) / 100
 	if wallet.Balance < actual {
@@ -415,8 +443,13 @@ func (s *BillingService) BatchCheckAutoReviewEligible(accountID uint64, candidat
 		return results
 	}
 	discountRate := wallet.DiscountRate
-	if discountRate == 0 {
-		discountRate = 0.85
+	if discountRate <= 0 || discountRate >= 1.0 {
+		monthRecharge, _ := s.billingRepo.GetCurrentMonthRechargeTotal(accountID)
+		if monthRecharge > 0 {
+			discountRate, _ = model.CalcDiscount(monthRecharge)
+		} else {
+			discountRate = 1.0
+		}
 	}
 
 	tradeUIDs := make([]string, len(candidates))
@@ -623,20 +656,24 @@ func (s *BillingService) getEmployeeWallet(accountID uint64) (*model.WalletResp,
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return &model.WalletResp{
 			Balance:         0,
-			DiscountRate:    0.85,
-			Level:           "V1",
-			DiscountDisplay: "85折",
+			DiscountRate:    1.0,
+			Level:           "",
+			DiscountDisplay: "无折扣",
 		}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	pct := int(math.Round(wallet.DiscountRate * 100))
+	display := "无折扣"
+	if wallet.DiscountRate < 1.0 {
+		pct := int(math.Round(wallet.DiscountRate * 100))
+		display = fmt.Sprintf("%d折", pct)
+	}
 	return &model.WalletResp{
 		Balance:         wallet.Balance,
 		DiscountRate:    wallet.DiscountRate,
 		Level:           wallet.Level,
-		DiscountDisplay: fmt.Sprintf("%d折", pct),
+		DiscountDisplay: display,
 	}, nil
 }
 
@@ -651,16 +688,14 @@ func (s *BillingService) SubmitRecharge(accountID uint64, req *model.SubmitRecha
 		return errors.New("该交易流水号已提交过，请勿重复提交")
 	}
 
-	// Create wallet on first recharge
+	// Create wallet on first recharge (no discount yet — will be locked on first deduction).
 	_, walletErr := s.billingRepo.GetWalletByAccountID(accountID)
 	if errors.Is(walletErr, gorm.ErrRecordNotFound) {
-		// Determine initial discount from this recharge amount
-		rate, level := model.CalcDiscount(req.Amount)
 		if err := s.billingRepo.CreateWallet(&model.Wallet{
 			AccountID:    accountID,
 			Balance:      0,
-			DiscountRate: rate,
-			Level:        level,
+			DiscountRate: 1.0,
+			Level:        "",
 		}); err != nil {
 			return err
 		}
