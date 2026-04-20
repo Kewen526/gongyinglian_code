@@ -411,7 +411,7 @@ func currentWalletBalance(db *gorm.DB, system string, accountID uint64) float64 
 func runVerify(db *gorm.DB, system, batch string, accountID uint64) {
 	fmt.Printf("\n========== VERIFY [%s] batch=%s ==========\n", system, batch)
 	var sums []AccountSummary
-	q := db.Where("batch = ? AND system = ?", batch, system)
+	q := db.Where("batch = ? AND `system` = ?", batch, system)
 	if accountID > 0 {
 		q = q.Where("account_id = ?", accountID)
 	}
@@ -448,7 +448,7 @@ func runApply(db *gorm.DB, system, batch string, accountID uint64) {
 	fmt.Printf("\n========== APPLY [%s] batch=%s ==========\n", system, batch)
 
 	var sums []AccountSummary
-	q := db.Where("batch = ? AND system = ? AND reverse_count > 0 AND executed = ?", batch, system, false)
+	q := db.Where("batch = ? AND `system` = ? AND reverse_count > 0 AND executed = ?", batch, system, false)
 	if accountID > 0 {
 		q = q.Where("account_id = ?", accountID)
 	}
@@ -467,7 +467,7 @@ func runApply(db *gorm.DB, system, batch string, accountID uint64) {
 
 func applyAccount(db *gorm.DB, s AccountSummary) {
 	var plans []RollbackPlan
-	if err := db.Where("batch = ? AND system = ? AND account_id = ? AND decision = ? AND executed = ?",
+	if err := db.Where("batch = ? AND `system` = ? AND account_id = ? AND decision = ? AND executed = ?",
 		s.Batch, s.System, s.AccountID, "REVERSE", false).
 		Order("record_time, record_id").Find(&plans).Error; err != nil {
 		log.Fatalf("load plans for account %d: %v", s.AccountID, err)
