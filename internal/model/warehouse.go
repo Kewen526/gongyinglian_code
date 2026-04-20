@@ -76,6 +76,7 @@ type WarehouseSubmitRechargeReq struct {
 type WarehouseBillingListReq struct {
 	Keyword   string `form:"keyword"`
 	ShopName  string `form:"shop_name"`
+	Type      string `form:"type"`
 	StartDate string `form:"start_date"`
 	EndDate   string `form:"end_date"`
 	Page      int    `form:"page"`
@@ -138,6 +139,7 @@ type WarehouseRejectRechargeReq struct {
 
 type WarehouseAdminBillingListReq struct {
 	Keyword   string `form:"keyword"`
+	Type      string `form:"type"`
 	StartDate string `form:"start_date"`
 	EndDate   string `form:"end_date"`
 	AccountID uint64 `form:"account_id"`

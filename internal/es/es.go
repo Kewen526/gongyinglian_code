@@ -244,8 +244,11 @@ func SearchProducts(ctx context.Context, index string, req *model.ProductListReq
 		"track_total_hits": true,
 	}
 
-	// search_after pagination
-	if req.SearchAfterCode != "" && req.SearchAfterID != "" {
+	// Traditional page-based pagination (from + size) when Page > 0
+	if req.Page > 0 {
+		query["from"] = (req.Page - 1) * req.PageSize
+	} else if req.SearchAfterCode != "" && req.SearchAfterID != "" {
+		// Cursor-based pagination fallback
 		query["search_after"] = []interface{}{req.SearchAfterCode, req.SearchAfterID}
 	}
 
