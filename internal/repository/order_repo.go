@@ -83,15 +83,23 @@ func (r *OrderRepo) ListTrades(req *model.OrderListReq, shopIDs []uint64) ([]mod
 		query = query.Where("process_status = ?", req.Status)
 	}
 
-	// Time range filter (based on create_time_ms)
+	// Time range filter (based on create_time_ms).
+	// Accept both "2006-01-02" and "2006-01-02 15:04:05" from the frontend.
 	if req.StartTime != "" {
 		t, err := time.ParseInLocation("2006-01-02 15:04:05", req.StartTime, time.Local)
+		if err != nil {
+			t, err = time.ParseInLocation("2006-01-02", req.StartTime, time.Local)
+		}
 		if err == nil {
 			query = query.Where("create_time_ms >= ?", t.UnixMilli())
 		}
 	}
 	if req.EndTime != "" {
 		t, err := time.ParseInLocation("2006-01-02 15:04:05", req.EndTime, time.Local)
+		if err != nil {
+			// Date-only: extend to end of day so the entire end date is included.
+			t, err = time.ParseInLocation("2006-01-02 15:04:05", req.EndTime+" 23:59:59", time.Local)
+		}
 		if err == nil {
 			query = query.Where("create_time_ms <= ?", t.UnixMilli())
 		}
