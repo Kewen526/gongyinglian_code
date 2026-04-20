@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"supply-chain/internal/config"
@@ -122,7 +123,11 @@ func main() {
 	log.Println("[Sync] After-sale sync service started")
 	log.Println("[Sync] Auto-review task started")
 
-	billingService.StartAutoDeduct()
+	if os.Getenv("DISABLE_AUTO_DEDUCT") != "true" {
+		billingService.StartAutoDeduct()
+	} else {
+		log.Println("[Billing] Auto-deduct DISABLED via DISABLE_AUTO_DEDUCT=true")
+	}
 	billingService.StartAutoRefund()
 	billingService.StartMonthlyDiscountRefresh()
 	defer billingService.Stop()
@@ -130,7 +135,11 @@ func main() {
 
 	warehouseRepo := repository.NewWarehouseRepo(db)
 	warehouseService := service.NewWarehouseService(warehouseRepo)
-	warehouseService.StartAutoDeduct()
+	if os.Getenv("DISABLE_AUTO_DEDUCT") != "true" {
+		warehouseService.StartAutoDeduct()
+	} else {
+		log.Println("[Warehouse] Auto-deduct DISABLED via DISABLE_AUTO_DEDUCT=true")
+	}
 	defer warehouseService.Stop()
 	log.Println("[Warehouse] Warehouse billing service started")
 
