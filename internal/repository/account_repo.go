@@ -83,8 +83,10 @@ func (r *AccountRepo) ListAccounts(page, pageSize int) ([]model.Account, int64, 
 	if page < 1 {
 		page = 1
 	}
-	if pageSize < 1 || pageSize > 100 {
+	if pageSize < 1 {
 		pageSize = 20
+	} else if pageSize > 1000 {
+		pageSize = 1000
 	}
 
 	var accounts []model.Account
