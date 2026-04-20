@@ -162,6 +162,13 @@ func main() {
 		for _, s := range systems {
 			runApply(db, s, *batch, *account)
 		}
+	case "rebalance":
+		if !*confirm {
+			log.Fatal("rebalance 模式必须加 -confirm 参数")
+		}
+		for _, s := range systems {
+			runRebalance(db, s, *account)
+		}
 	default:
 		log.Fatalf("unknown mode: %s", *mode)
 	}
@@ -564,6 +571,88 @@ func applyAccount(db *gorm.DB, s AccountSummary) {
 	}
 	fmt.Printf("  [%s] account=%d OK: balance %.2f -> %.2f, reversed %d records (%.2f)\n",
 		s.System, s.AccountID, s.CurrentBalance, s.CorrectBalance, s.ReverseCount, s.ReverseAmount)
+}
+
+// ---------- rebalance ----------
+
+// runRebalance 重新按时间序计算每笔 billing_record / warehouse_billing_record 的
+// balance_before 和 balance_after，使账单页面显示的"交易后余额"和当前钱包余额保持一致。
+func runRebalance(db *gorm.DB, system string, accountID uint64) {
+	fmt.Printf("\n========== REBALANCE [%s] ==========\n", system)
+	accounts := affectedAccounts(db, system, accountID)
+	if len(accounts) == 0 {
+		fmt.Println("No accounts found.")
+		return
+	}
+	var totalUpdated int
+	for _, acc := range accounts {
+		n := rebalanceAccount(db, system, acc)
+		totalUpdated += n
+	}
+	fmt.Printf("\nTOTAL: updated %d records across %d accounts\n", totalUpdated, len(accounts))
+}
+
+func rebalanceAccount(db *gorm.DB, system string, accountID uint64) int {
+	events := loadEvents(db, system, accountID)
+	if len(events) == 0 {
+		return 0
+	}
+	sort.SliceStable(events, func(i, j int) bool {
+		if !events[i].CreatedAt.Equal(events[j].CreatedAt) {
+			return events[i].CreatedAt.Before(events[j].CreatedAt)
+		}
+		return events[i].RecordID < events[j].RecordID
+	})
+
+	table, _, _ := tableColumns(system)
+	balance := 0.0
+	updated := 0
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		// 锁钱包行，防止和在线扣款并发
+		if system == "billing" {
+			var w model.Wallet
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("account_id = ?", accountID).First(&w).Error; err != nil {
+				return fmt.Errorf("lock wallet: %w", err)
+			}
+		} else {
+			var w model.WarehouseWallet
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("account_id = ?", accountID).First(&w).Error; err != nil {
+				return fmt.Errorf("lock warehouse wallet: %w", err)
+			}
+		}
+
+		for _, e := range events {
+			before := balance
+			switch e.Type {
+			case "recharge", "refund":
+				balance = round2(balance + e.Amount)
+			case "deduct":
+				balance = round2(balance - e.Amount)
+			}
+			after := balance
+
+			if math.Abs(e.BalBefore-before) > 0.001 || math.Abs(e.BalAfter-after) > 0.001 {
+				if err := tx.Table(table).Where("id = ?", e.RecordID).
+					Updates(map[string]interface{}{
+						"balance_before": before,
+						"balance_after":  after,
+					}).Error; err != nil {
+					return fmt.Errorf("update record %d: %w", e.RecordID, err)
+				}
+				updated++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("  [%s] account=%d FAILED: %v\n", system, accountID, err)
+		return 0
+	}
+	fmt.Printf("  [%s] account=%d: updated %d records\n", system, accountID, updated)
+	return updated
 }
 
 // ---------- helpers ----------
