@@ -60,6 +60,14 @@ type WarehouseBillingRecord struct {
 
 func (WarehouseBillingRecord) TableName() string { return "warehouse_billing_record" }
 
+// WarehouseFlowCounter is an atomic per-day sequence table for CW flow numbers.
+type WarehouseFlowCounter struct {
+	Date string `gorm:"primaryKey;type:varchar(8);comment:YYYYMMDD"`
+	Seq  int    `gorm:"not null;default:0"`
+}
+
+func (WarehouseFlowCounter) TableName() string { return "warehouse_flow_counter" }
+
 // ---------- Request / Response DTOs ----------
 
 type WarehouseWalletResp struct {

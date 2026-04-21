@@ -148,29 +148,23 @@ func (r *WarehouseRepo) CreateBillingRecord(tx *gorm.DB, rec *model.WarehouseBil
 	return tx.Create(rec).Error
 }
 
-// GenerateFlowNo generates the next flow number for today: CW-YYYYMMDD-NNN.
-// Must be called within a transaction to avoid duplicates.
+// GenerateFlowNo generates the next flow number for today: CW-YYYYMMDD-NNNN.
+// Uses an atomic INSERT … ON DUPLICATE KEY UPDATE counter so concurrent calls
+// within the same or different transactions never collide.
 func (r *WarehouseRepo) GenerateFlowNo(tx *gorm.DB) (string, error) {
 	today := time.Now().Format("20060102")
-	prefix := "CW-" + today + "-"
-
-	var maxFlowNo *string
-	err := tx.Model(&model.WarehouseBillingRecord{}).
-		Where("flow_no LIKE ?", prefix+"%").
-		Select("MAX(flow_no)").
-		Scan(&maxFlowNo).Error
-	if err != nil {
-		return "", err
+	if err := tx.Exec(
+		"INSERT INTO warehouse_flow_counter (`date`, seq) VALUES (?, 1) ON DUPLICATE KEY UPDATE seq = seq + 1",
+		today,
+	).Error; err != nil {
+		return "", fmt.Errorf("generate flow counter: %w", err)
 	}
-
-	seq := 1
-	if maxFlowNo != nil && len(*maxFlowNo) >= len(prefix)+3 {
-		suffix := (*maxFlowNo)[len(prefix):]
-		if n, err := fmt.Sscanf(suffix, "%d", &seq); n == 1 && err == nil {
-			seq++
-		}
+	var counter struct{ Seq int }
+	if err := tx.Raw("SELECT seq FROM warehouse_flow_counter WHERE `date` = ?", today).
+		Scan(&counter).Error; err != nil {
+		return "", fmt.Errorf("read flow counter: %w", err)
 	}
-	return fmt.Sprintf("%s%03d", prefix, seq), nil
+	return fmt.Sprintf("CW-%s-%04d", today, counter.Seq), nil
 }
 
 // ---------- Queries ----------
