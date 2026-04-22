@@ -1278,6 +1278,10 @@ func (s *SyncService) saveForeignOrders(rawOrders []map[string]interface{}) (int
 		}
 
 		trade := mapForeignOrderTrade(raw)
+		// Skip unpaid orders (oln_status_code=1 = 待付款), consistent with domestic logic.
+		if trade.OlnStatus == 1 {
+			continue
+		}
 		items := mapForeignOrderItems(raw)
 
 		if trade.SysShop != "" {
