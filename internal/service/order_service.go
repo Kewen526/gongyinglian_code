@@ -21,11 +21,21 @@ func NewOrderService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopR
 
 // getEffectiveShopIDs returns the shop IDs visible to the given account.
 // SuperAdmin → nil (all shops); all other roles → own account_shop records.
+// nil is the sentinel for "no filter" (SuperAdmin only). Non-admin accounts
+// with no shops get an empty non-nil slice, which causes ListTrades to return
+// nothing rather than everything.
 func (s *OrderService) getEffectiveShopIDs(accountID uint64, role uint8) ([]uint64, error) {
 	if role == model.RoleSuperAdmin {
 		return nil, nil
 	}
-	return s.shopRepo.GetAccountShopIDs(accountID)
+	shopIDs, err := s.shopRepo.GetAccountShopIDs(accountID)
+	if err != nil {
+		return nil, err
+	}
+	if shopIDs == nil {
+		shopIDs = []uint64{}
+	}
+	return shopIDs, nil
 }
 
 // ListOrders returns paginated orders with permission filtering.
