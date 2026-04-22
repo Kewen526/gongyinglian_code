@@ -87,7 +87,10 @@ func (h *OrderHandler) GetStatusOptions(c *gin.Context) {
 // GET /api/v1/shops — list shops, optionally filtered by platform
 func (h *OrderHandler) ListShops(c *gin.Context) {
 	platform := c.Query("platform")
-	shops, err := h.orderSvc.ListShops(platform)
+	accountID := c.GetUint64("account_id")
+	r, _ := c.Get("role")
+	role, _ := r.(uint8)
+	shops, err := h.orderSvc.ListShops(platform, accountID, role)
 	if err != nil {
 		response.InternalError(c, "查询店铺失败")
 		return
@@ -97,7 +100,10 @@ func (h *OrderHandler) ListShops(c *gin.Context) {
 
 // GET /api/v1/shops/grouped — list shops grouped by platform
 func (h *OrderHandler) ListShopsGrouped(c *gin.Context) {
-	grouped, err := h.orderSvc.ListShopsGrouped()
+	accountID := c.GetUint64("account_id")
+	r, _ := c.Get("role")
+	role, _ := r.(uint8)
+	grouped, err := h.orderSvc.ListShopsGrouped(accountID, role)
 	if err != nil {
 		response.InternalError(c, "查询店铺失败")
 		return
@@ -107,7 +113,10 @@ func (h *OrderHandler) ListShopsGrouped(c *gin.Context) {
 
 // GET /api/v1/platforms — list distinct platforms
 func (h *OrderHandler) ListPlatforms(c *gin.Context) {
-	platforms, err := h.orderSvc.ListPlatforms()
+	accountID := c.GetUint64("account_id")
+	r, _ := c.Get("role")
+	role, _ := r.(uint8)
+	platforms, err := h.orderSvc.ListPlatforms(accountID, role)
 	if err != nil {
 		response.InternalError(c, "查询平台失败")
 		return
