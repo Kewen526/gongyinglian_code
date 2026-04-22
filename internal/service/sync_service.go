@@ -1278,6 +1278,10 @@ func (s *SyncService) saveForeignOrders(rawOrders []map[string]interface{}) (int
 		}
 
 		trade := mapForeignOrderTrade(raw)
+		// Skip unpaid orders (oln_status_code=1 = 待付款), consistent with domestic logic.
+		if trade.OlnStatus == 1 {
+			continue
+		}
 		items := mapForeignOrderItems(raw)
 
 		if trade.SysShop != "" {
@@ -1326,7 +1330,9 @@ func mapForeignOrderTrade(m map[string]interface{}) model.OrderTrade {
 		SeriesNo:       getString(m, "series_no"),
 		// numeric status
 		ProcessStatus:  getInt(m, "process_status"),
-		Status:         getInt(m, "status"),
+		// foreign trade's `status` field is always 0; derive our system status
+		// from the authoritative oln_status string instead.
+		Status:         foreignOlnStatusToOrderStatus(getString(m, "oln_status")),
 		OlnStatus:      getInt(m, "oln_status_code"),
 		IsPay:          getBool(m, "is_pay"),
 		TradeType:      getInt(m, "trade_type"),
@@ -1408,17 +1414,34 @@ func mapForeignOrderItems(m map[string]interface{}) []model.OrderItem {
 			OlnSkuID:    getString(om, "oln_sku_id"),
 			OlnSkuName:  getString(om, "oln_sku_name"),
 			OlnItemName: getString(om, "oln_item_name"),
-			OlnStatus:   getInt(om, "oln_status_code"),
-			Status:      getInt(om, "status"),
-			TidSnapshot: getString(om, "tid_snapshot"),
-			GxPayment:   getFloat(om, "gx_payment"),
-			// foreign uses "barcode" (no underscore) for the SKU barcode
-			BarCode:     getString(om, "barcode"),
+			OlnStatus:          getInt(om, "oln_status_code"),
+			Status:             getInt(om, "status"),
+			TidSnapshot:        getString(om, "tid_snapshot"),
+			GxPayment:          getFloat(om, "gx_payment"),
+			BarCode:            getString(om, "barcode"), // foreign uses "barcode" (no underscore)
+			ItemImageURL:       getString(om, "online_item_picture_url"),
 			OrderTotalDiscount: getFloat(om, "order_total_discount"),
 		}
 		items = append(items, item)
 	}
 	return items
+}
+
+// foreignOlnStatusToOrderStatus converts the foreign trade oln_status string
+// to our internal OrderStatus int (1~5). The foreign `status` field is always 0
+// and cannot be used; the oln_status string is the authoritative status.
+func foreignOlnStatusToOrderStatus(olnStatus string) int {
+	switch olnStatus {
+	case "已发货":
+		return model.OrderStatusShipped
+	case "已完成", "成功":
+		return model.OrderStatusCompleted
+	case "已关闭", "关闭", "异常结束":
+		return model.OrderStatusClosed
+	default:
+		// "待发货", "待审核", "打单配货", "验货", etc. → processing
+		return model.OrderStatusProcessing
+	}
 }
 
 // parseForeignTime parses a "2006-01-02 15:04:05" string to Unix milliseconds.
