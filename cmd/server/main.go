@@ -76,6 +76,7 @@ func main() {
 		&model.WarehouseRechargeRequest{},
 		&model.WarehouseBillingRecord{},
 		&model.WarehouseFlowCounter{},
+		&model.WlnGoodsSpecCache{},
 	); err != nil {
 		log.Fatalf("Failed to auto-migrate tables: %v", err)
 	}
@@ -103,13 +104,14 @@ func main() {
 	orderRepo := repository.NewOrderRepo(db)
 	shopRepo := repository.NewShopRepo(db)
 	billingRepo := repository.NewBillingRepo(db)
+	wlnGoodsRepo := repository.NewWlnGoodsRepo(db)
 
 	// ---------- Service Layer ----------
 	accountService := service.NewAccountService(accountRepo, shopRepo)
 	productService := service.NewProductService(productRepo, accountRepo)
 	billingService := service.NewBillingService(billingRepo, orderRepo, productRepo)
 	orderService := service.NewOrderService(orderRepo, shopRepo, accountRepo, billingService)
-	syncService := service.NewSyncService(orderRepo, shopRepo, accountRepo, &cfg.WanLiNiu, billingService)
+	syncService := service.NewSyncService(orderRepo, shopRepo, accountRepo, &cfg.WanLiNiu, billingService, wlnGoodsRepo)
 
 	// Wire the ERP mark-push hook so BillingService can restore "已审核" on
 	// WanLiNiu after an insufficient-balance order recovers via recharge.
@@ -123,12 +125,14 @@ func main() {
 	syncService.StartAutoReview()
 	syncService.StartForeignSync()
 	syncService.StartForeignAfterSaleSync()
+	syncService.StartImageRefresh()
 	defer syncService.Stop()
 	log.Println("[Sync] Order sync service started")
 	log.Println("[Sync] After-sale sync service started")
 	log.Println("[Sync] Auto-review task started")
 	log.Println("[Sync] Foreign order sync service started")
 	log.Println("[Sync] Foreign after-sale sync service started")
+	log.Println("[GoodsCache] Image refresh service started")
 
 	if os.Getenv("DISABLE_AUTO_DEDUCT") != "true" {
 		billingService.StartAutoDeduct()
