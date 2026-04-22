@@ -456,6 +456,8 @@ func orderTradeUpdateColumns() []string {
 		"oper_inspection", "oper_send", "additon",
 		"split_trade", "exchange_trade", "is_small_trade",
 		"oln_order_list_json", "merge_uids_json", "platform_discount_json",
+		"series_no",
+		// "trade_source" intentionally excluded — set once at insert, never overwritten.
 		"updated_at",
 	}
 }

@@ -20,6 +20,12 @@ const (
 	MarkBarcodeError = "审核失败货号错误"
 )
 
+// TradeSource distinguishes domestic (内贸) from foreign/cross-border (外贸) orders.
+const (
+	TradeSourceDomestic = "domestic"
+	TradeSourceForeign  = "foreign"
+)
+
 // ProcessStatus —万里牛单据处理状态
 const (
 	ProcessStatusDistributorAudit = -3 // 分销商审核
@@ -131,6 +137,8 @@ type OrderTrade struct {
 	OlnOrderListJSON      string     `json:"-" gorm:"type:text;comment:明细线上单号JSON"`
 	MergeUidsJSON         string     `json:"-" gorm:"type:text;comment:合并前订单号JSON"`
 	PlatformDiscountJSON  string     `json:"-" gorm:"type:text;comment:平台优惠信息JSON"`
+	SeriesNo              string     `json:"series_no" gorm:"type:varchar(128);comment:平台序列号(外贸)"`
+	TradeSource           string     `json:"trade_source" gorm:"type:varchar(16);index;default:'domestic';comment:订单来源 domestic/foreign"`
 	MarkApprovedAt        *time.Time `json:"mark_approved_at" gorm:"type:datetime;index;comment:mark变为已审核的时间"`
 	BillingStatus         int8       `json:"billing_status" gorm:"type:tinyint;default:0;index;index:idx_refund_scan,priority:2;comment:0未扣款1成功2余额不足3错误4已退款"`
 	WarehouseStatus       int8       `json:"warehouse_status" gorm:"type:tinyint;default:0;index:idx_warehouse_scan;comment:云仓扣款0未扣1成功2余额不足"`
@@ -198,6 +206,7 @@ type Shop struct {
 	ShopNick       string    `json:"shop_nick" gorm:"type:varchar(128);comment:店铺昵称"`
 	SourcePlatform string    `json:"source_platform" gorm:"type:varchar(64);index;comment:来源平台"`
 	ShopType       int       `json:"shop_type" gorm:"type:int;default:0;comment:平台类型"`
+	TradeSource    string    `json:"trade_source" gorm:"type:varchar(16);default:'domestic';comment:订单来源 domestic/foreign"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
