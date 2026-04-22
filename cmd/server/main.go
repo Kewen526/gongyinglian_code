@@ -113,16 +113,22 @@ func main() {
 
 	// Wire the ERP mark-push hook so BillingService can restore "已审核" on
 	// WanLiNiu after an insufficient-balance order recovers via recharge.
-	billingService.SetMarkPusher(syncService.BatchMarkOrders)
+	// SmartMarkPush routes to the correct API (domestic batch-mark vs foreign remark)
+	// based on each order's trade_source.
+	billingService.SetMarkPusher(syncService.SmartMarkPush)
 
 	// ---------- Start scheduled tasks ----------
 	syncService.StartAutoSync()
 	syncService.StartAfterSaleSync()
 	syncService.StartAutoReview()
+	syncService.StartForeignSync()
+	syncService.StartForeignAfterSaleSync()
 	defer syncService.Stop()
 	log.Println("[Sync] Order sync service started")
 	log.Println("[Sync] After-sale sync service started")
 	log.Println("[Sync] Auto-review task started")
+	log.Println("[Sync] Foreign order sync service started")
+	log.Println("[Sync] Foreign after-sale sync service started")
 
 	if os.Getenv("DISABLE_AUTO_DEDUCT") != "true" {
 		billingService.StartAutoDeduct()

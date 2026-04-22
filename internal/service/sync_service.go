@@ -18,13 +18,28 @@ import (
 )
 
 const (
-	syncKey          = "order_sync"
-	tradeListPath    = "/erp/opentrade/list/trades"
-	batchMarkPath    = "/erp/opentrade/modify/batch/mark"
-	returnOrderPath  = "/erp/open/return/order/list"
-	maxPageSize      = 200
-	initialSyncDays  = 7  // first sync pulls last 7 days
+	syncKey           = "order_sync"
+	tradeListPath     = "/erp/opentrade/list/trades"
+	batchMarkPath     = "/erp/opentrade/modify/batch/mark"
+	returnOrderPath   = "/erp/open/return/order/list"
+	maxPageSize       = 200
+	initialSyncDays   = 7  // first sync pulls last 7 days
 	afterSaleSyncDays = 15 // after-sale sync pulls last 15 days
+
+	// Foreign trade (跨境) API paths — prefix /cerp instead of /erp
+	foreignSyncKey        = "order_sync_foreign"
+	foreignTradeListPath  = "/cerp/openorder/query/list/trades"
+	foreignRemarkPath     = "/cerp/openorder/remark/modify/remark"
+	foreignAfterSalePath  = "/cerp/after_sales/bill/query"
+
+	// foreignAfterSaleTypeReturn and foreignAfterSaleProblemReason are the filter
+	// conditions that trigger a refund (equivalent to domestic type=0 + describe="退货退款").
+	foreignAfterSaleTypeReturn    = 2
+	foreignAfterSaleProblemReason = "退货退款"
+
+	// foreignRemarkDelay is the inter-call pause for the foreign remark API.
+	// The official rate limit is 100 calls/minute; 650 ms gives ~92/min — safe headroom.
+	foreignRemarkDelay = 650 * time.Millisecond
 )
 
 // autoReviewBatchSize is the max orders per WanLiNiu batch-mark API call.
@@ -822,11 +837,46 @@ func (s *SyncService) BatchMarkOrdersWithBalanceCheck(items []model.MarkItem) (*
 		return result, nil
 	}
 
-	// Push to WanLiNiu.
-	if err := s.BatchMarkOrders(toPush); err != nil {
-		return result, err
+	// Split toPush into domestic and foreign by looking up each trade's source.
+	var domesticPush []model.MarkItem
+	var foreignPush []model.MarkItem
+	for _, item := range toPush {
+		trade, err := s.orderRepo.GetTradeByTradeNo(item.BillCode)
+		if err != nil || trade == nil || trade.TradeSource != model.TradeSourceForeign {
+			domesticPush = append(domesticPush, item)
+		} else {
+			foreignPush = append(foreignPush, item)
+		}
 	}
-	result.Pushed = len(toPush)
+
+	// Push domestic orders to WanLiNiu batch-mark API.
+	if len(domesticPush) > 0 {
+		if err := s.BatchMarkOrders(domesticPush); err != nil {
+			return result, err
+		}
+	}
+
+	// Push foreign orders one by one to the remark API.
+	for i, item := range foreignPush {
+		if i > 0 {
+			time.Sleep(foreignRemarkDelay)
+		}
+		if err := s.pushForeignRemarkApproved(item.BillCode); err != nil {
+			log.Printf("[Mark] pushForeignRemarkApproved trade=%s: %v\n", item.BillCode, err)
+			result.Skipped++
+			// Remove from approvedUIDs so we don't update DB for this one
+			trade, _ := s.orderRepo.GetTradeByTradeNo(item.BillCode)
+			if trade != nil {
+				for idx, uid := range approvedUIDs {
+					if uid == trade.UID {
+						approvedUIDs = append(approvedUIDs[:idx], approvedUIDs[idx+1:]...)
+						break
+					}
+				}
+			}
+		}
+	}
+	result.Pushed = len(domesticPush) + len(foreignPush) - result.Skipped
 
 	// For the "已审核" entries we pushed, update local mark + trigger async deduction.
 	if len(approvedUIDs) > 0 {
@@ -976,18 +1026,33 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 		return
 	}
 
-	// Step 5: call WanLiNiu in batches of autoReviewBatchSize, then update DB
+	// Step 5: push to WanLiNiu and update DB.
+	// Domestic orders: batch up to autoReviewBatchSize per API call.
+	// Foreign orders: one call per order with rate-limit delay.
 	now := time.Now()
-	for start := 0; start < len(approved); start += autoReviewBatchSize {
+
+	type approvedItemAlias = approvedItem // avoid shadowing the local type
+
+	var domesticApproved []approvedItemAlias
+	var foreignApproved []approvedItemAlias
+	for _, a := range approved {
+		if a.trade.TradeSource == model.TradeSourceForeign {
+			foreignApproved = append(foreignApproved, a)
+		} else {
+			domesticApproved = append(domesticApproved, a)
+		}
+	}
+
+	// --- Domestic batch push ---
+	for start := 0; start < len(domesticApproved); start += autoReviewBatchSize {
 		if start > 0 {
-			// Rate-limit WanLiNiu push between consecutive batches.
 			time.Sleep(autoReviewBatchDelay)
 		}
 		end := start + autoReviewBatchSize
-		if end > len(approved) {
-			end = len(approved)
+		if end > len(domesticApproved) {
+			end = len(domesticApproved)
 		}
-		batch := approved[start:end]
+		batch := domesticApproved[start:end]
 
 		markItems := make([]model.MarkItem, len(batch))
 		uids := make([]string, len(batch))
@@ -996,26 +1061,42 @@ func (s *SyncService) processAccountAutoReview(account *model.Account) {
 			uids[i] = a.trade.UID
 		}
 
-		// Call WanLiNiu; skip DB update if API fails (will retry next cycle)
 		if err := s.BatchMarkOrders(markItems); err != nil {
 			log.Printf("[AutoReview] BatchMarkOrders account=%d batch=%d-%d: %v\n",
 				account.ID, start, end, err)
 			continue
 		}
 
-		// Bulk DB update (single UPDATE...WHERE uid IN ?)
 		if err := s.orderRepo.BatchMarkApproved(uids, now); err != nil {
 			log.Printf("[AutoReview] BatchMarkApproved DB error: %v\n", err)
 		}
-
-		// Trigger async billing deduction for each marked trade
 		for _, a := range batch {
 			a.trade.Mark = model.MarkApproved
 			a.trade.MarkApprovedAt = &now
 			s.billingService.TriggerDeductionAsync(a.trade)
 		}
+		log.Printf("[AutoReview] Account=%d marked %d domestic orders\n", account.ID, len(batch))
+	}
 
-		log.Printf("[AutoReview] Account=%d marked %d orders\n", account.ID, len(batch))
+	// --- Foreign per-order push ---
+	for i, a := range foreignApproved {
+		if i > 0 {
+			time.Sleep(foreignRemarkDelay)
+		}
+		if err := s.pushForeignRemarkApproved(a.trade.TradeNo); err != nil {
+			log.Printf("[AutoReview] pushForeignRemarkApproved account=%d trade=%s: %v\n",
+				account.ID, a.trade.TradeNo, err)
+			continue
+		}
+		if err := s.orderRepo.BatchMarkApproved([]string{a.trade.UID}, now); err != nil {
+			log.Printf("[AutoReview] BatchMarkApproved (foreign) DB error: %v\n", err)
+		}
+		a.trade.Mark = model.MarkApproved
+		a.trade.MarkApprovedAt = &now
+		s.billingService.TriggerDeductionAsync(a.trade)
+	}
+	if len(foreignApproved) > 0 {
+		log.Printf("[AutoReview] Account=%d marked %d foreign orders\n", account.ID, len(foreignApproved))
 	}
 }
 
@@ -1026,4 +1107,584 @@ func (s *SyncService) getAutoReviewShopIDs(account *model.Account) ([]uint64, er
 		return nil, nil
 	}
 	return s.shopRepo.GetAccountShopIDs(account.ID)
+}
+
+// ==================== Foreign Trade (跨境) Sync ====================
+
+// StartForeignSync starts a background goroutine that syncs cross-border orders periodically.
+func (s *SyncService) StartForeignSync() {
+	interval := time.Duration(s.cfg.SyncInterval) * time.Second
+	if interval < 30*time.Second {
+		interval = 60 * time.Second
+	}
+	go func() {
+		log.Printf("[ForeignSync] Auto sync started, interval=%v\n", interval)
+		s.syncForeignOnce()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.syncForeignOnce()
+			case <-s.stopCh:
+				log.Println("[ForeignSync] Auto sync stopped")
+				return
+			}
+		}
+	}()
+}
+
+// SyncForeignNow triggers an immediate foreign-trade sync and returns the order count.
+func (s *SyncService) SyncForeignNow() (int, error) {
+	return s.syncForeignOnceWithResult()
+}
+
+func (s *SyncService) syncForeignOnce() {
+	count, err := s.syncForeignOnceWithResult()
+	if err != nil {
+		log.Printf("[ForeignSync] Error: %v\n", err)
+	} else {
+		log.Printf("[ForeignSync] Completed, synced %d orders\n", count)
+	}
+}
+
+func (s *SyncService) syncForeignOnceWithResult() (int, error) {
+	state, err := s.orderRepo.GetSyncState(foreignSyncKey)
+	if err != nil {
+		return 0, fmt.Errorf("get sync state: %w", err)
+	}
+
+	now := time.Now()
+	var startTime time.Time
+	if state == nil || state.LastSyncTime == 0 {
+		startTime = now.AddDate(0, 0, -initialSyncDays)
+	} else {
+		startTime = time.UnixMilli(state.LastSyncTime).Add(-5 * time.Minute)
+	}
+
+	startStr := startTime.Format("2006-01-02 15:04:05")
+	endStr := now.Format("2006-01-02 15:04:05")
+
+	log.Printf("[ForeignSync] Fetching orders: rm_time %s ~ %s\n", startStr, endStr)
+
+	allOrders, err := s.fetchAllForeignOrders(startStr, endStr)
+	if err != nil {
+		return 0, fmt.Errorf("fetch foreign orders: %w", err)
+	}
+
+	if len(allOrders) == 0 {
+		s.orderRepo.UpsertSyncState(foreignSyncKey, now.UnixMilli())
+		return 0, nil
+	}
+
+	savedCount, err := s.saveForeignOrders(allOrders)
+	if err != nil {
+		return savedCount, fmt.Errorf("save foreign orders: %w", err)
+	}
+
+	s.orderRepo.UpsertSyncState(foreignSyncKey, now.UnixMilli())
+	return savedCount, nil
+}
+
+func (s *SyncService) fetchAllForeignOrders(startTime, endTime string) ([]map[string]interface{}, error) {
+	var allOrders []map[string]interface{}
+	page := 1
+	for {
+		result, err := s.fetchForeignPage(page, maxPageSize, startTime, endTime)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", page, err)
+		}
+		code, _ := result["code"].(float64)
+		if int(code) != 0 {
+			return nil, fmt.Errorf("API error on page %d: %v", page, result)
+		}
+		dataRaw, ok := result["data"]
+		if !ok || dataRaw == nil {
+			break
+		}
+		// Foreign trade API may return data as list or dict{"list":[...]}
+		var orders []interface{}
+		switch v := dataRaw.(type) {
+		case []interface{}:
+			orders = v
+		case map[string]interface{}:
+			if list, ok := v["list"].([]interface{}); ok {
+				orders = list
+			}
+		}
+		if len(orders) == 0 {
+			break
+		}
+		for _, o := range orders {
+			if m, ok := o.(map[string]interface{}); ok {
+				allOrders = append(allOrders, m)
+			}
+		}
+		if len(orders) < maxPageSize {
+			break
+		}
+		page++
+		time.Sleep(300 * time.Millisecond)
+	}
+	return allOrders, nil
+}
+
+func (s *SyncService) fetchForeignPage(page, limit int, startTime, endTime string) (map[string]interface{}, error) {
+	timestampMs := strconv.FormatInt(time.Now().UnixMilli(), 10)
+
+	allParams := map[string]string{
+		"page":           strconv.Itoa(page),
+		"limit":          strconv.Itoa(limit),
+		"rm_time_start":  startTime,
+		"rm_time_end":    endTime,
+		"_app":           s.cfg.AppKey,
+		"_t":             timestampMs,
+		"_s":             "",
+	}
+	allParams["_sign"] = buildForeignSign(allParams, s.cfg.Secret)
+
+	form := url.Values{}
+	for k, v := range allParams {
+		form.Set(k, v)
+	}
+
+	resp, err := wanLiNiuClient.Post(
+		s.cfg.BaseURL+foreignTradeListPath,
+		"application/x-www-form-urlencoded",
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("http post: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("json unmarshal: %w", err)
+	}
+	return result, nil
+}
+
+func (s *SyncService) saveForeignOrders(rawOrders []map[string]interface{}) (int, error) {
+	saved := 0
+	for _, raw := range rawOrders {
+		// Skip deleted orders (foreign equivalent of domestic oln_status=1 skip)
+		if getInt(raw, "is_deleted") == 1 {
+			continue
+		}
+
+		trade := mapForeignOrderTrade(raw)
+		items := mapForeignOrderItems(raw)
+
+		if trade.SysShop != "" {
+			shop := model.Shop{
+				SysShop:        trade.SysShop,
+				ShopName:       trade.ShopName,
+				ShopNick:       trade.ShopNick,
+				SourcePlatform: trade.SourcePlatform,
+				TradeSource:    model.TradeSourceForeign,
+			}
+			if err := s.shopRepo.Upsert(&shop); err != nil {
+				log.Printf("[ForeignSync] Warning: upsert shop %s: %v\n", trade.SysShop, err)
+			}
+		}
+
+		if err := s.orderRepo.UpsertTradeWithItems(&trade, items); err != nil {
+			log.Printf("[ForeignSync] Warning: upsert trade %s: %v\n", trade.UID, err)
+			continue
+		}
+		saved++
+
+		if trade.Mark == model.MarkApproved && s.billingService != nil {
+			_ = s.orderRepo.SetMarkApprovedAtIfNull(trade.UID, time.Now())
+			s.billingService.TriggerDeductionAsync(&trade)
+		}
+	}
+	return saved, nil
+}
+
+// mapForeignOrderTrade maps a foreign trade (跨境) API response map to an OrderTrade.
+func mapForeignOrderTrade(m map[string]interface{}) model.OrderTrade {
+	t := model.OrderTrade{
+		// uid / trade_no
+		UID:            getString(m, "trade_uid"),
+		TradeNo:        getString(m, "trade_no"),
+		// shop info — foreign uses shop_id instead of sys_shop
+		SysShop:        getString(m, "shop_id"),
+		ShopName:       getString(m, "shop_name"),
+		ShopNick:       getString(m, "shop_nick"),
+		SourcePlatform: getString(m, "source_platform"),
+		// logistics / warehouse
+		StorageName:    getString(m, "storage_name"),
+		StorageCode:    getString(m, "storage_code"),
+		// platform ids
+		TpTid:          getString(m, "tp_tid"),
+		SeriesNo:       getString(m, "series_no"),
+		// numeric status
+		ProcessStatus:  getInt(m, "process_status"),
+		Status:         getInt(m, "status"),
+		OlnStatus:      getInt(m, "oln_status_code"),
+		IsPay:          getBool(m, "is_pay"),
+		TradeType:      getInt(m, "trade_type"),
+		Flag:           getInt(m, "flag"),
+		// amounts
+		SumSale:        getFloat(m, "sum_sale"),
+		PostFee:        getFloat(m, "post_fee"),
+		PaidFee:        getFloat(m, "paid_fee"),
+		DiscountFee:    getFloat(m, "discount_fee"),
+		ServiceFee:     getFloat(m, "service_fee"),
+		CurrencyCode:   getString(m, "currency_code"),
+		CurrencySum:    getFloat(m, "currency_sum"),
+		Weight:         getFloat(m, "weight"),
+		Volume:         getFloat(m, "volume"),
+		Zip:            getString(m, "zip"),
+		// exception / misc
+		IsExceptionTrade: getBool(m, "is_exception_trade"),
+		IsSmallTrade:     getBool(m, "is_small_trade"),
+		// source tag
+		TradeSource:    model.TradeSourceForeign,
+	}
+
+	// Parse string timestamps ("2006-01-02 15:04:05") to milliseconds.
+	t.CreateTimeMs = parseForeignTime(getString(m, "create_time"))
+	t.ModifyTimeMs = parseForeignTime(getString(m, "modify_time"))
+	t.PayTimeMs = parseForeignTime(getString(m, "pay_time"))
+	t.SendTimeMs = parseForeignTime(getString(m, "send_time"))
+
+	// Serialize oln_order list to JSON (equivalent of domestic oln_order_list).
+	if v, ok := m["oln_order"]; ok {
+		b, _ := json.Marshal(v)
+		t.OlnOrderListJSON = string(b)
+	}
+
+	return t
+}
+
+// mapForeignOrderItems maps the "orders" array inside a foreign trade API response.
+func mapForeignOrderItems(m map[string]interface{}) []model.OrderItem {
+	ordersRaw, ok := m["orders"]
+	if !ok {
+		return nil
+	}
+	ordersList, ok := ordersRaw.([]interface{})
+	if !ok || len(ordersList) == 0 {
+		return nil
+	}
+
+	tradeUID := getString(m, "trade_uid")
+	items := make([]model.OrderItem, 0, len(ordersList))
+
+	for _, raw := range ordersList {
+		om, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Prefer order_item_id as the unique identifier; fall back to order_id.
+		orderID := getString(om, "order_item_id")
+		if orderID == "" {
+			orderID = getString(om, "order_id")
+		}
+
+		item := model.OrderItem{
+			TradeUID:    tradeUID,
+			OrderID:     orderID,
+			ItemName:    getString(om, "item_name"),
+			SkuName:     getString(om, "sku_name"),
+			SkuCode:     getString(om, "sku_code"),
+			Size:        int(getFloat(om, "size")), // foreign returns float
+			Price:       getFloat(om, "price"),
+			Payment:     getFloat(om, "payment"),
+			CurrencySum: getFloat(om, "currency_sum"),
+			TpTid:       getString(om, "tp_tid"),
+			TpOid:       getString(om, "tp_oid"),
+			OlnItemID:   getString(om, "oln_item_id"),
+			OlnItemCode: getString(om, "oln_item_code"),
+			OlnSkuCode:  getString(om, "oln_sku_code"),
+			OlnSkuID:    getString(om, "oln_sku_id"),
+			OlnSkuName:  getString(om, "oln_sku_name"),
+			OlnItemName: getString(om, "oln_item_name"),
+			OlnStatus:   getInt(om, "oln_status_code"),
+			Status:      getInt(om, "status"),
+			TidSnapshot: getString(om, "tid_snapshot"),
+			GxPayment:   getFloat(om, "gx_payment"),
+			// foreign uses "barcode" (no underscore) for the SKU barcode
+			BarCode:     getString(om, "barcode"),
+			OrderTotalDiscount: getFloat(om, "order_total_discount"),
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+// parseForeignTime parses a "2006-01-02 15:04:05" string to Unix milliseconds.
+// Returns 0 for empty or unparseable input.
+func parseForeignTime(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.Local)
+	if err != nil {
+		return 0
+	}
+	return t.UnixMilli()
+}
+
+// buildForeignSign computes the WanLiNiu cross-border API signature.
+// Differences from domestic buildSign:
+//   - _t uses millisecond timestamp
+//   - _s="" parameter is expected in the params map before calling
+//   - returns lowercase hex (as required by the cross-border API)
+func buildForeignSign(params map[string]string, secret string) string {
+	filtered := make(map[string]string)
+	for k, v := range params {
+		if k != "_sign" {
+			filtered[k] = v
+		}
+	}
+	keys := make([]string, 0, len(filtered))
+	for k := range filtered {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+url.QueryEscape(filtered[k]))
+	}
+	paramStr := strings.Join(parts, "&")
+	raw := secret + paramStr + secret
+	hash := md5.Sum([]byte(raw))
+	return fmt.Sprintf("%x", hash) // lowercase, as required by cerp API
+}
+
+// ==================== Foreign Trade After-Sale Sync ====================
+
+// StartForeignAfterSaleSync starts a background goroutine that syncs
+// cross-border after-sale orders every 5 minutes.
+func (s *SyncService) StartForeignAfterSaleSync() {
+	go func() {
+		log.Println("[ForeignAfterSale] Sync started (interval=5m)")
+		s.foreignAfterSaleOnce()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.foreignAfterSaleOnce()
+			case <-s.stopCh:
+				log.Println("[ForeignAfterSale] Sync stopped")
+				return
+			}
+		}
+	}()
+}
+
+func (s *SyncService) foreignAfterSaleOnce() {
+	now := time.Now()
+	start := now.AddDate(0, 0, -afterSaleSyncDays).Format("2006-01-02 00:00:00")
+	end := now.Format("2006-01-02 15:04:05")
+
+	count, err := s.syncForeignAfterSaleOrders(start, end)
+	if err != nil {
+		log.Printf("[ForeignAfterSale] Error: %v\n", err)
+	} else if count > 0 {
+		log.Printf("[ForeignAfterSale] Marked %d orders as after-sale complete\n", count)
+	}
+}
+
+func (s *SyncService) syncForeignAfterSaleOrders(startTime, endTime string) (int, error) {
+	var allBills []map[string]interface{}
+	page := 1
+	for {
+		result, err := s.fetchForeignAfterSalePage(page, maxPageSize, startTime, endTime)
+		if err != nil {
+			return 0, err
+		}
+		code, _ := result["code"].(float64)
+		if int(code) != 0 {
+			return 0, fmt.Errorf("API error: %v", result)
+		}
+		dataRaw, ok := result["data"]
+		if !ok || dataRaw == nil {
+			break
+		}
+		var bills []interface{}
+		switch v := dataRaw.(type) {
+		case []interface{}:
+			bills = v
+		case map[string]interface{}:
+			if list, ok := v["list"].([]interface{}); ok {
+				bills = list
+			}
+		}
+		if len(bills) == 0 {
+			break
+		}
+		for _, b := range bills {
+			if bm, ok := b.(map[string]interface{}); ok {
+				allBills = append(allBills, bm)
+			}
+		}
+		if len(bills) < maxPageSize {
+			break
+		}
+		page++
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	count := 0
+	for _, bill := range allBills {
+		// Filter: after_sale_type=2 (退货) AND problem_reason="退货退款"
+		afterSaleType := getInt(bill, "after_sale_type")
+		problemReason := getString(bill, "problem_reason")
+		if afterSaleType != foreignAfterSaleTypeReturn || problemReason != foreignAfterSaleProblemReason {
+			continue
+		}
+		// order_no is the trade_no (OD-prefixed) in the foreign trade system
+		tradeNo := getString(bill, "order_no")
+		if tradeNo == "" {
+			continue
+		}
+		updated, err := s.orderRepo.MarkAfterSaleComplete(tradeNo)
+		if err != nil {
+			log.Printf("[ForeignAfterSale] Failed to mark trade_no=%s: %v\n", tradeNo, err)
+			continue
+		}
+		if updated {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *SyncService) fetchForeignAfterSalePage(page, limit int, startTime, endTime string) (map[string]interface{}, error) {
+	timestampMs := strconv.FormatInt(time.Now().UnixMilli(), 10)
+
+	allParams := map[string]string{
+		"page":               strconv.Itoa(page),
+		"limit":              strconv.Itoa(limit),
+		"modify_time_start":  startTime,
+		"modify_time_end":    endTime,
+		"_app":               s.cfg.AppKey,
+		"_t":                 timestampMs,
+		"_s":                 "",
+	}
+	allParams["_sign"] = buildForeignSign(allParams, s.cfg.Secret)
+
+	form := url.Values{}
+	for k, v := range allParams {
+		form.Set(k, v)
+	}
+
+	resp, err := wanLiNiuClient.Post(
+		s.cfg.BaseURL+foreignAfterSalePath,
+		"application/x-www-form-urlencoded",
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("http post: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("json unmarshal: %w", err)
+	}
+	return result, nil
+}
+
+// ==================== Foreign Trade Mark (已审核) ====================
+
+// pushForeignRemarkApproved sets printable_remark="已审核" on a single foreign trade order.
+// The cross-border remark API (/cerp/openorder/remark/modify/remark) is per-order only.
+func (s *SyncService) pushForeignRemarkApproved(tradeNo string) error {
+	timestampMs := strconv.FormatInt(time.Now().UnixMilli(), 10)
+
+	allParams := map[string]string{
+		"bill_code":        tradeNo,
+		"printable_remark": model.MarkApproved,
+		"seller_remark":    "",
+		"buyer_comments":   "",
+		"system_remark":    "",
+		"_app":             s.cfg.AppKey,
+		"_t":               timestampMs,
+		"_s":               "",
+	}
+	allParams["_sign"] = buildForeignSign(allParams, s.cfg.Secret)
+
+	form := url.Values{}
+	for k, v := range allParams {
+		form.Set(k, v)
+	}
+
+	resp, err := wanLiNiuClient.Post(
+		s.cfg.BaseURL+foreignRemarkPath,
+		"application/x-www-form-urlencoded",
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		return fmt.Errorf("http post: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read body: %w", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("json unmarshal: %w", err)
+	}
+	code, ok := result["code"]
+	if !ok {
+		return fmt.Errorf("unexpected response: %s", string(body))
+	}
+	codeFloat, _ := code.(float64)
+	if int(codeFloat) != 0 {
+		msg, _ := result["message"].(string)
+		return fmt.Errorf("wanliniu foreign error %d: %s", int(codeFloat), msg)
+	}
+	return nil
+}
+
+// SmartMarkPush routes a batch of mark items to the correct WanLiNiu API
+// based on each order's TradeSource. Used as the BillingService mark-push hook
+// so that recovery pushes (after recharge) reach the right endpoint.
+func (s *SyncService) SmartMarkPush(items []model.MarkItem) error {
+	var domestic []model.MarkItem
+	var foreign []model.MarkItem
+
+	for _, item := range items {
+		trade, err := s.orderRepo.GetTradeByTradeNo(item.BillCode)
+		if err != nil || trade == nil || trade.TradeSource != model.TradeSourceForeign {
+			domestic = append(domestic, item)
+		} else {
+			foreign = append(foreign, item)
+		}
+	}
+
+	if len(domestic) > 0 {
+		if err := s.BatchMarkOrders(domestic); err != nil {
+			return err
+		}
+	}
+
+	for i, item := range foreign {
+		if i > 0 {
+			time.Sleep(foreignRemarkDelay)
+		}
+		if err := s.pushForeignRemarkApproved(item.BillCode); err != nil {
+			return err
+		}
+	}
+	return nil
 }
