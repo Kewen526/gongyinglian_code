@@ -40,6 +40,17 @@ const (
 	// foreignRemarkDelay is the inter-call pause for the foreign remark API.
 	// The official rate limit is 100 calls/minute; 650 ms gives ~92/min — safe headroom.
 	foreignRemarkDelay = 650 * time.Millisecond
+
+	// goodsSpecPath is the WanLiNiu cross-border goods+spec query API path.
+	goodsSpecPath = "/cerp/goods/spec/open/query/goodswithspeclist"
+
+	// goodsQueryDelay is the inter-call pause when querying the goods API.
+	// Same 100 calls/minute rate limit as the foreign remark API.
+	goodsQueryDelay = 650 * time.Millisecond
+
+	// imageRefreshInterval is how often the background refresh task re-fetches
+	// stale cached goods entries. Matches WlnGoodsCacheTTL (3 days).
+	imageRefreshInterval = 3 * 24 * time.Hour
 )
 
 // autoReviewBatchSize is the max orders per WanLiNiu batch-mark API call.
@@ -61,16 +72,18 @@ type SyncService struct {
 	accountRepo    *repository.AccountRepo
 	cfg            *config.WanLiNiuConfig
 	billingService *BillingService
+	wlnGoodsRepo   *repository.WlnGoodsRepo
 	stopCh         chan struct{}
 }
 
-func NewSyncService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopRepo, accountRepo *repository.AccountRepo, cfg *config.WanLiNiuConfig, billingService *BillingService) *SyncService {
+func NewSyncService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopRepo, accountRepo *repository.AccountRepo, cfg *config.WanLiNiuConfig, billingService *BillingService, wlnGoodsRepo *repository.WlnGoodsRepo) *SyncService {
 	return &SyncService{
 		orderRepo:      orderRepo,
 		shopRepo:       shopRepo,
 		accountRepo:    accountRepo,
 		cfg:            cfg,
 		billingService: billingService,
+		wlnGoodsRepo:   wlnGoodsRepo,
 		stopCh:         make(chan struct{}),
 	}
 }
@@ -1271,6 +1284,8 @@ func (s *SyncService) fetchForeignPage(page, limit int, startTime, endTime strin
 
 func (s *SyncService) saveForeignOrders(rawOrders []map[string]interface{}) (int, error) {
 	saved := 0
+	var allSavedItems []model.OrderItem
+
 	for _, raw := range rawOrders {
 		// Skip deleted orders (foreign equivalent of domestic oln_status=1 skip)
 		if getInt(raw, "is_deleted") == 1 {
@@ -1302,12 +1317,17 @@ func (s *SyncService) saveForeignOrders(rawOrders []map[string]interface{}) (int
 			continue
 		}
 		saved++
+		allSavedItems = append(allSavedItems, items...)
 
 		if trade.Mark == model.MarkApproved && s.billingService != nil {
 			_ = s.orderRepo.SetMarkApprovedAtIfNull(trade.UID, time.Now())
 			s.billingService.TriggerDeductionAsync(&trade)
 		}
 	}
+
+	// Enrich order item images asynchronously after all orders are saved.
+	s.enrichForeignOrderImages(allSavedItems)
+
 	return saved, nil
 }
 
@@ -1710,4 +1730,312 @@ func (s *SyncService) SmartMarkPush(items []model.MarkItem) error {
 		}
 	}
 	return nil
+}
+
+// ==================== Goods Image Cache ====================
+
+// StartImageRefresh starts a background goroutine that periodically re-fetches
+// stale entries from the WanLiNiu goods API and updates order_item images.
+func (s *SyncService) StartImageRefresh() {
+	if s.wlnGoodsRepo == nil {
+		return
+	}
+	go func() {
+		log.Printf("[GoodsCache] Image refresh started (interval=%v)\n", imageRefreshInterval)
+		ticker := time.NewTicker(imageRefreshInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.refreshExpiredGoodsImages()
+			case <-s.stopCh:
+				log.Println("[GoodsCache] Image refresh stopped")
+				return
+			}
+		}
+	}()
+}
+
+// refreshExpiredGoodsImages finds all distinct goods_codes whose cache is stale,
+// re-fetches from the WanLiNiu API, updates the cache, and overwrites order_item
+// images with fresh URLs.
+func (s *SyncService) refreshExpiredGoodsImages() {
+	goodsCodes, err := s.wlnGoodsRepo.GetExpiredGoodsCodeDistinct()
+	if err != nil {
+		log.Printf("[GoodsCache] Error fetching expired goods codes: %v\n", err)
+		return
+	}
+	if len(goodsCodes) == 0 {
+		return
+	}
+	log.Printf("[GoodsCache] Refreshing %d expired goods\n", len(goodsCodes))
+
+	for i, goodsCode := range goodsCodes {
+		if i > 0 {
+			time.Sleep(goodsQueryDelay)
+		}
+		goods, err := s.fetchGoods(map[string]string{
+			"item_code": goodsCode,
+			"page":      "1",
+			"limit":     "1",
+		})
+		if err != nil {
+			log.Printf("[GoodsCache] Refresh API error goods_code=%s: %v\n", goodsCode, err)
+			continue
+		}
+		if goods == nil {
+			continue
+		}
+		entries := buildCacheEntries(goods)
+		if err := s.wlnGoodsRepo.UpsertSpecsCache(entries); err != nil {
+			log.Printf("[GoodsCache] Refresh upsert error goods_code=%s: %v\n", goodsCode, err)
+			continue
+		}
+		picMap := specsToPicMap(entries)
+		if len(picMap) > 0 {
+			if err := s.wlnGoodsRepo.RefreshOrderItemImages(picMap); err != nil {
+				log.Printf("[GoodsCache] Refresh image update error goods_code=%s: %v\n", goodsCode, err)
+			}
+		}
+	}
+	log.Printf("[GoodsCache] Refresh completed for %d goods\n", len(goodsCodes))
+}
+
+// enrichForeignOrderImages is called after foreign orders are saved. It launches
+// a goroutine that looks up missing images for each order item's bar_code and
+// fills them in order_item.item_image_url.
+func (s *SyncService) enrichForeignOrderImages(savedItems []model.OrderItem) {
+	if s.wlnGoodsRepo == nil || len(savedItems) == 0 {
+		return
+	}
+
+	// Collect unique, non-empty bar_codes from the saved items.
+	seen := make(map[string]struct{})
+	barCodes := make([]string, 0, len(savedItems))
+	for _, item := range savedItems {
+		if item.BarCode == "" {
+			continue
+		}
+		if _, exists := seen[item.BarCode]; !exists {
+			seen[item.BarCode] = struct{}{}
+			barCodes = append(barCodes, item.BarCode)
+		}
+	}
+	if len(barCodes) == 0 {
+		return
+	}
+
+	go func() {
+		s.fillImagesBySpecCodes(barCodes)
+	}()
+}
+
+// fillImagesBySpecCodes resolves images for the given spec codes (= bar_codes),
+// fetching any cache misses from the WanLiNiu goods API, then fills
+// order_item.item_image_url for all rows whose image is currently empty.
+func (s *SyncService) fillImagesBySpecCodes(specCodes []string) {
+	// Step 1: check which spec codes are already cached and valid.
+	cached, err := s.wlnGoodsRepo.GetCachedSpecs(specCodes)
+	if err != nil {
+		log.Printf("[GoodsCache] GetCachedSpecs error: %v\n", err)
+		return
+	}
+
+	// Step 2: collect spec codes that are not in the cache.
+	var missing []string
+	for _, sc := range specCodes {
+		if _, ok := cached[sc]; !ok {
+			missing = append(missing, sc)
+		}
+	}
+
+	// Step 3: for each missing spec code, call the goods API.
+	// locallyFetched tracks spec codes populated in this run so we don't make
+	// a redundant API call for a sibling spec that was already returned by a
+	// previous response from the same parent goods.
+	if len(missing) > 0 {
+		locallyFetched := make(map[string]model.WlnGoodsSpecCache)
+		fetchedGoods := make(map[string]bool) // guards against duplicate goods queries
+
+		for i, specCode := range missing {
+			// Was this spec populated by a sibling's API response earlier?
+			if _, ok := locallyFetched[specCode]; ok {
+				continue
+			}
+
+			if i > 0 {
+				time.Sleep(goodsQueryDelay)
+			}
+
+			goods, err := s.fetchGoods(map[string]string{
+				"spec_code": specCode,
+				"page":      "1",
+				"limit":     "1",
+			})
+			if err != nil {
+				log.Printf("[GoodsCache] API error spec_code=%s: %v\n", specCode, err)
+				continue
+			}
+			if goods == nil {
+				continue
+			}
+
+			goodsCode := getString(goods, "goods_code")
+			if goodsCode == "" || fetchedGoods[goodsCode] {
+				continue
+			}
+			fetchedGoods[goodsCode] = true
+
+			entries := buildCacheEntries(goods)
+			if err := s.wlnGoodsRepo.UpsertSpecsCache(entries); err != nil {
+				log.Printf("[GoodsCache] Upsert error goods_code=%s: %v\n", goodsCode, err)
+			}
+			for _, e := range entries {
+				locallyFetched[e.SpecCode] = e
+			}
+		}
+
+		// Merge locally fetched into the cached map so Step 4 sees them.
+		for sc, entry := range locallyFetched {
+			cached[sc] = entry
+		}
+	}
+
+	// Step 4: build barCode→pic map and fill only empty image fields.
+	picMap := specsToPicMap(cached)
+	if len(picMap) == 0 {
+		return
+	}
+	if err := s.wlnGoodsRepo.FillMissingOrderItemImages(picMap); err != nil {
+		log.Printf("[GoodsCache] FillMissingOrderItemImages error: %v\n", err)
+	}
+}
+
+// fetchGoods calls the WanLiNiu goods+spec API with the given query parameters
+// and returns the first goods object from the response, or nil if none found.
+func (s *SyncService) fetchGoods(queryParams map[string]string) (map[string]interface{}, error) {
+	allParams := map[string]string{
+		"_app": s.cfg.AppKey,
+		"_t":   strconv.FormatInt(time.Now().UnixMilli(), 10),
+		"_s":   "",
+	}
+	for k, v := range queryParams {
+		allParams[k] = v
+	}
+	allParams["_sign"] = buildForeignSign(allParams, s.cfg.Secret)
+
+	form := url.Values{}
+	for k, v := range allParams {
+		form.Set(k, v)
+	}
+
+	resp, err := wanLiNiuClient.Post(
+		s.cfg.BaseURL+goodsSpecPath,
+		"application/x-www-form-urlencoded",
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("http post: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("json unmarshal: %w", err)
+	}
+
+	code, _ := result["code"].(float64)
+	if int(code) != 0 {
+		msg, _ := result["message"].(string)
+		return nil, fmt.Errorf("WLN goods API error %d: %s", int(code), msg)
+	}
+
+	dataRaw := result["data"]
+	if dataRaw == nil {
+		return nil, nil
+	}
+
+	var goodsList []interface{}
+	switch v := dataRaw.(type) {
+	case []interface{}:
+		goodsList = v
+	case map[string]interface{}:
+		if list, ok := v["list"].([]interface{}); ok {
+			goodsList = list
+		}
+	}
+
+	if len(goodsList) == 0 {
+		return nil, nil
+	}
+	goods, ok := goodsList[0].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+	return goods, nil
+}
+
+// buildCacheEntries converts a single goods API response object into a slice of
+// WlnGoodsSpecCache rows, one per spec variant. spec.pic is preferred; if empty,
+// the parent goods.pic is used as fallback.
+func buildCacheEntries(goods map[string]interface{}) []model.WlnGoodsSpecCache {
+	goodsCode := getString(goods, "goods_code")
+	goodsName := getString(goods, "goods_name")
+	goodsPic := getString(goods, "pic")
+	sysGoodsUID := getString(goods, "sys_goods_uid")
+	now := time.Now().UnixMilli()
+
+	specsRaw, _ := goods["specs"].([]interface{})
+	entries := make([]model.WlnGoodsSpecCache, 0, len(specsRaw))
+	for _, sr := range specsRaw {
+		sm, ok := sr.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		specCode := getString(sm, "spec_code")
+		if specCode == "" {
+			continue
+		}
+		pic := getString(sm, "pic")
+		if pic == "" {
+			pic = goodsPic
+		}
+		entries = append(entries, model.WlnGoodsSpecCache{
+			SpecCode:    specCode,
+			GoodsCode:   goodsCode,
+			GoodsName:   goodsName,
+			Spec1:       getString(sm, "spec1"),
+			Pic:         pic,
+			SysGoodsUID: sysGoodsUID,
+			SysSpecUID:  getString(sm, "sys_spec_uid"),
+			FetchedAt:   now,
+		})
+	}
+	return entries
+}
+
+// specsToPicMap converts a collection of cache entries (map or slice form) to a
+// barCode→pic map, filtering out entries with empty pics.
+func specsToPicMap(entries interface{}) map[string]string {
+	picMap := make(map[string]string)
+	switch v := entries.(type) {
+	case map[string]model.WlnGoodsSpecCache:
+		for sc, entry := range v {
+			if entry.Pic != "" {
+				picMap[sc] = entry.Pic
+			}
+		}
+	case []model.WlnGoodsSpecCache:
+		for _, entry := range v {
+			if entry.SpecCode != "" && entry.Pic != "" {
+				picMap[entry.SpecCode] = entry.Pic
+			}
+		}
+	}
+	return picMap
 }
