@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"supply-chain/internal/model"
 	"supply-chain/internal/repository"
 	"time"
@@ -21,11 +22,21 @@ func NewOrderService(orderRepo *repository.OrderRepo, shopRepo *repository.ShopR
 
 // getEffectiveShopIDs returns the shop IDs visible to the given account.
 // SuperAdmin → nil (all shops); all other roles → own account_shop records.
+// nil is the sentinel for "no filter" (SuperAdmin only). Non-admin accounts
+// with no shops get an empty non-nil slice, which causes ListTrades to return
+// nothing rather than everything.
 func (s *OrderService) getEffectiveShopIDs(accountID uint64, role uint8) ([]uint64, error) {
 	if role == model.RoleSuperAdmin {
 		return nil, nil
 	}
-	return s.shopRepo.GetAccountShopIDs(accountID)
+	shopIDs, err := s.shopRepo.GetAccountShopIDs(accountID)
+	if err != nil {
+		return nil, err
+	}
+	if shopIDs == nil {
+		shopIDs = []uint64{}
+	}
+	return shopIDs, nil
 }
 
 // ListOrders returns paginated orders with permission filtering.
@@ -105,17 +116,41 @@ func (s *OrderService) isShopAuthorized(sysShop string, shopIDs []uint64) bool {
 	return false
 }
 
-// ListShops returns all shops, optionally filtered by platform.
-func (s *OrderService) ListShops(platform string) ([]model.Shop, error) {
-	if platform != "" {
-		return s.shopRepo.ListByPlatform(platform)
+// ListShops returns shops visible to the caller, optionally filtered by platform.
+// SuperAdmin sees all shops; other roles see only their account_shop entries.
+func (s *OrderService) ListShops(platform string, accountID uint64, role uint8) ([]model.Shop, error) {
+	if role == model.RoleSuperAdmin {
+		if platform != "" {
+			return s.shopRepo.ListByPlatform(platform)
+		}
+		return s.shopRepo.ListAll()
 	}
-	return s.shopRepo.ListAll()
+	shopIDs, err := s.shopRepo.GetAccountShopIDs(accountID)
+	if err != nil {
+		return nil, err
+	}
+	if len(shopIDs) == 0 {
+		return []model.Shop{}, nil
+	}
+	shops, err := s.shopRepo.GetByIDs(shopIDs)
+	if err != nil {
+		return nil, err
+	}
+	if platform != "" {
+		var filtered []model.Shop
+		for _, sh := range shops {
+			if sh.SourcePlatform == platform {
+				filtered = append(filtered, sh)
+			}
+		}
+		return filtered, nil
+	}
+	return shops, nil
 }
 
-// ListShopsByPlatform returns shops grouped by platform.
-func (s *OrderService) ListShopsGrouped() ([]model.ShopsByPlatformResp, error) {
-	shops, err := s.shopRepo.ListAll()
+// ListShopsGrouped returns shops grouped by platform, restricted to the caller's access.
+func (s *OrderService) ListShopsGrouped(accountID uint64, role uint8) ([]model.ShopsByPlatformResp, error) {
+	shops, err := s.ListShops("", accountID, role)
 	if err != nil {
 		return nil, err
 	}
@@ -139,9 +174,32 @@ func (s *OrderService) ListShopsGrouped() ([]model.ShopsByPlatformResp, error) {
 	return result, nil
 }
 
-// ListPlatforms returns distinct platform names.
-func (s *OrderService) ListPlatforms() ([]string, error) {
-	return s.shopRepo.ListPlatforms()
+// ListPlatforms returns distinct platform names visible to the caller.
+func (s *OrderService) ListPlatforms(accountID uint64, role uint8) ([]string, error) {
+	if role == model.RoleSuperAdmin {
+		return s.shopRepo.ListPlatforms()
+	}
+	shopIDs, err := s.shopRepo.GetAccountShopIDs(accountID)
+	if err != nil {
+		return nil, err
+	}
+	if len(shopIDs) == 0 {
+		return []string{}, nil
+	}
+	shops, err := s.shopRepo.GetByIDs(shopIDs)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	var platforms []string
+	for _, sh := range shops {
+		if _, exists := seen[sh.SourcePlatform]; !exists {
+			seen[sh.SourcePlatform] = struct{}{}
+			platforms = append(platforms, sh.SourcePlatform)
+		}
+	}
+	sort.Strings(platforms)
+	return platforms, nil
 }
 
 // GetEmployeeOccupiedShops returns shops assigned to employees, with owner info.
