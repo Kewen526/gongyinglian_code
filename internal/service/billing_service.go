@@ -159,7 +159,7 @@ func (s *BillingService) processRefund(trade *model.OrderTrade) error {
 		return err
 	}
 
-	log.Printf("[Billing] Refunded trade=%s amount=%.2f accountID=%d\n", trade.TradeNo, deductRec.ActualAmount, accountID)
+	log.Printf("[Billing] Refunded trade=%s amount=%.3f accountID=%d\n", trade.TradeNo, deductRec.ActualAmount, accountID)
 	return nil
 }
 
@@ -304,7 +304,7 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 			previewRate = 1.0
 		}
 	}
-	previewActual := math.Round(originalAmount*previewRate*100) / 100
+	previewActual := math.Round(originalAmount*previewRate*1000) / 1000
 
 	rec.OriginalAmount = originalAmount
 
@@ -342,14 +342,14 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 			}
 		}
 
-		actual := math.Round(originalAmount*effectiveRate*100) / 100
+		actual := math.Round(originalAmount*effectiveRate*1000) / 1000
 		if w.Balance < actual {
 			insufficientAfterLock = true
 			return nil
 		}
-		newBalance := math.Round((w.Balance-actual)*100) / 100
+		newBalance := math.Round((w.Balance-actual)*1000) / 1000
 		rec.DiscountRate = effectiveRate
-		rec.DiscountAmount = math.Round((originalAmount-actual)*100) / 100
+		rec.DiscountAmount = math.Round((originalAmount-actual)*1000) / 1000
 		rec.ActualAmount = actual
 		rec.BalanceBefore = w.Balance
 		rec.BalanceAfter = newBalance
@@ -423,7 +423,7 @@ func (s *BillingService) CheckAutoReviewEligible(sysShop, tradeUID string) Deduc
 			discountRate = 1.0
 		}
 	}
-	actual := math.Round(cost*discountRate*100) / 100
+	actual := math.Round(cost*discountRate*1000) / 1000
 	if wallet.Balance < actual {
 		return DeductInsufficient
 	}
@@ -524,7 +524,7 @@ func (s *BillingService) BatchCheckAutoReviewEligible(accountID uint64, candidat
 			continue
 		}
 
-		actual := math.Round(total*discountRate*100) / 100
+		actual := math.Round(total*discountRate*1000) / 1000
 		if wallet.Balance < actual {
 			results[c.UID] = DeductInsufficient
 		} else {
@@ -570,7 +570,7 @@ func (s *BillingService) calculateOrderAmount(tradeUID string) (float64, error) 
 		total += price * float64(item.Size)
 	}
 
-	return math.Round(total*100) / 100, nil
+	return math.Round(total*1000) / 1000, nil
 }
 
 // resolveAccountID finds the employee account (role=3) assigned to the given sys_shop.
@@ -647,7 +647,7 @@ func (s *BillingService) GetWallet(accountID uint64, role uint8) (*model.WalletR
 		total += w.Balance
 	}
 	return &model.WalletResp{
-		Balance: math.Round(total*100) / 100,
+		Balance: math.Round(total*1000) / 1000,
 	}, nil
 }
 
