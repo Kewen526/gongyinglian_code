@@ -128,11 +128,15 @@ func SetupRouter(
 		orderEdit.POST("/orders/mark", orderHandler.BatchMarkOrders)
 	}
 
-	// --- Shop/Platform queries (any logged-in user with order view) ---
-	orderView.GET("/shops", orderHandler.ListShops)
-	orderView.GET("/shops/grouped", orderHandler.ListShopsGrouped)
-	orderView.GET("/shops/occupied", orderHandler.GetOccupiedShopIDs)
-	orderView.GET("/platforms", orderHandler.ListPlatforms)
+	// --- Shop/Platform queries (order view permission OR account manager role) ---
+	shopView := auth.Group("")
+	shopView.Use(middleware.RequireOrderViewOrAccountManager(accountRepo))
+	{
+		shopView.GET("/shops", orderHandler.ListShops)
+		shopView.GET("/shops/grouped", orderHandler.ListShopsGrouped)
+		shopView.GET("/shops/occupied", orderHandler.GetOccupiedShopIDs)
+		shopView.GET("/platforms", orderHandler.ListPlatforms)
+	}
 
 	// --- Billing (employees only, billing module permission) ---
 	billingGroup := auth.Group("")
