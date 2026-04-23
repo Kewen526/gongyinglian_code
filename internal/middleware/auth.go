@@ -120,6 +120,55 @@ func RequireAccountManager() gin.HandlerFunc {
 	}
 }
 
+// RequireOrderViewOrAccountManager allows access if the user has order module
+// view permission OR is an account manager (role 0/1/2). Used for shop/platform
+// query endpoints that serve both order management and account management contexts.
+func RequireOrderViewOrAccountManager(accountRepo *repository.AccountRepo) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, _ := c.Get("role")
+		r, _ := role.(uint8)
+
+		if r == model.RoleSuperAdmin || r == model.RoleTeamLead || r == model.RoleSupervisor {
+			c.Next()
+			return
+		}
+
+		accountID := c.GetUint64("account_id")
+
+		perms, err := accountRepo.GetPermissionsByAccountID(accountID)
+		if err != nil {
+			response.InternalError(c, "权限查询失败")
+			c.Abort()
+			return
+		}
+
+		modules, err := accountRepo.GetAllModules()
+		if err != nil {
+			response.InternalError(c, "模块查询失败")
+			c.Abort()
+			return
+		}
+
+		var orderModuleID uint64
+		for _, m := range modules {
+			if m.Code == "order" {
+				orderModuleID = m.ID
+				break
+			}
+		}
+
+		for _, p := range perms {
+			if p.ModuleID == orderModuleID && (p.CanView == 1 || p.CanEdit == 1) {
+				c.Next()
+				return
+			}
+		}
+
+		response.Forbidden(c, "无该模块的查看权限")
+		c.Abort()
+	}
+}
+
 // RequireModulePermission checks that the current user has the specified
 // permission (view or edit) on the given module code.
 // Super admin bypasses all checks.
