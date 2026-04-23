@@ -205,7 +205,7 @@ func calcPackingFee(itemCount int) float64 {
 	if itemCount <= 0 {
 		return 0
 	}
-	fee := 0.80 + 0.15*float64(itemCount-1)
+	fee := 0.95 + 0.15*float64(itemCount-1)
 	return math.Round(fee*1000) / 1000
 }
 
