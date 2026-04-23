@@ -42,11 +42,11 @@ func CalcDiscount(amount float64) (float64, string) {
 type Wallet struct {
 	ID                uint64    `json:"id" gorm:"primaryKey;autoIncrement"`
 	AccountID         uint64    `json:"account_id" gorm:"not null;uniqueIndex;comment:账号ID"`
-	Balance           float64   `json:"balance" gorm:"type:decimal(12,2);default:0;comment:可用余额"`
+	Balance           float64   `json:"balance" gorm:"type:decimal(12,3);default:0;comment:可用余额"`
 	DiscountRate      float64   `json:"discount_rate" gorm:"type:decimal(4,2);default:1;comment:当前折扣率，1.0=无折扣"`
 	Level             string    `json:"level" gorm:"type:varchar(8);default:'';comment:等级"`
-	LastMonthSpending float64   `json:"last_month_spending" gorm:"type:decimal(12,2);default:0;comment:上月消费总额"`
-	BalanceSnapshot   float64   `json:"balance_snapshot" gorm:"type:decimal(12,2);default:0;comment:本月1号0点余额快照"`
+	LastMonthSpending float64   `json:"last_month_spending" gorm:"type:decimal(12,3);default:0;comment:上月消费总额"`
+	BalanceSnapshot   float64   `json:"balance_snapshot" gorm:"type:decimal(12,3);default:0;comment:本月1号0点余额快照"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
@@ -78,14 +78,14 @@ type BillingRecord struct {
 	TradeUID       string     `json:"trade_uid" gorm:"type:varchar(64);index;comment:订单UID"`
 	Platform       string     `json:"platform" gorm:"type:varchar(64);comment:平台"`
 	ShopName       string     `json:"shop_name" gorm:"type:varchar(128);comment:店铺名"`
-	OriginalAmount float64    `json:"original_amount" gorm:"type:decimal(12,2);default:0;comment:原价"`
+	OriginalAmount float64    `json:"original_amount" gorm:"type:decimal(12,3);default:0;comment:原价"`
 	DiscountRate   float64    `json:"discount_rate" gorm:"type:decimal(4,2);default:1;comment:折扣率"`
-	DiscountAmount float64    `json:"discount_amount" gorm:"type:decimal(12,2);default:0;comment:优惠金额"`
-	ActualAmount   float64    `json:"actual_amount" gorm:"type:decimal(12,2);default:0;comment:实际扣款"`
+	DiscountAmount float64    `json:"discount_amount" gorm:"type:decimal(12,3);default:0;comment:优惠金额"`
+	ActualAmount   float64    `json:"actual_amount" gorm:"type:decimal(12,3);default:0;comment:实际扣款"`
 	Type           string     `json:"type" gorm:"type:varchar(16);comment:deduct/refund"`
 	Status         string     `json:"status" gorm:"type:varchar(16);index;comment:success/insufficient/error"`
-	BalanceBefore  float64    `json:"balance_before" gorm:"type:decimal(12,2);default:0;comment:交易前余额"`
-	BalanceAfter   float64    `json:"balance_after" gorm:"type:decimal(12,2);default:0;comment:交易后余额"`
+	BalanceBefore  float64    `json:"balance_before" gorm:"type:decimal(12,3);default:0;comment:交易前余额"`
+	BalanceAfter   float64    `json:"balance_after" gorm:"type:decimal(12,3);default:0;comment:交易后余额"`
 	MarkApprovedAt *time.Time `json:"mark_approved_at" gorm:"comment:发货时间(已审核时刻)"`
 	ErrorMsg       string     `json:"error_msg" gorm:"type:text;comment:错误原因"`
 	CreatedAt      time.Time  `json:"created_at"`

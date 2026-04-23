@@ -106,7 +106,7 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 
 	shippingFee := trade.PostCost
 	packingFee := calcPackingFee(totalItems)
-	totalAmount := math.Round((shippingFee+packingFee)*100) / 100
+	totalAmount := math.Round((shippingFee+packingFee)*1000) / 1000
 
 	// Check existing record (idempotency via trade_uid unique index)
 	var existing model.WarehouseBillingRecord
@@ -119,11 +119,11 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 		s.repo.DB().Delete(&existing)
 	}
 
-	log.Printf("[Warehouse] Processing trade=%s account=%d items=%d shipping=%.2f packing=%.2f total=%.2f balance=%.2f\n",
+	log.Printf("[Warehouse] Processing trade=%s account=%d items=%d shipping=%.3f packing=%.3f total=%.3f balance=%.3f\n",
 		trade.TradeNo, accountID, totalItems, shippingFee, packingFee, totalAmount, wallet.Balance)
 
 	if wallet.Balance < totalAmount {
-		log.Printf("[Warehouse] Insufficient balance for trade=%s: need=%.2f have=%.2f\n", trade.TradeNo, totalAmount, wallet.Balance)
+		log.Printf("[Warehouse] Insufficient balance for trade=%s: need=%.3f have=%.3f\n", trade.TradeNo, totalAmount, wallet.Balance)
 		_ = s.repo.UpdateWarehouseStatus(trade.UID, model.WarehouseStatusInsufficient)
 		return nil
 	}
@@ -149,7 +149,7 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 				insufficientAfterLock = true
 				return nil
 			}
-			newBalance := math.Round((w.Balance-totalAmount)*100) / 100
+			newBalance := math.Round((w.Balance-totalAmount)*1000) / 1000
 
 			flowNo, err := s.repo.GenerateFlowNo(tx)
 			if err != nil {
@@ -192,7 +192,7 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 		return txErr
 	}
 	if insufficientAfterLock {
-		log.Printf("[Warehouse] Insufficient balance after lock for trade=%s: need=%.2f\n", trade.TradeNo, totalAmount)
+		log.Printf("[Warehouse] Insufficient balance after lock for trade=%s: need=%.3f\n", trade.TradeNo, totalAmount)
 		_ = s.repo.UpdateWarehouseStatus(trade.UID, model.WarehouseStatusInsufficient)
 		return nil
 	}
@@ -206,7 +206,7 @@ func calcPackingFee(itemCount int) float64 {
 		return 0
 	}
 	fee := 0.80 + 0.15*float64(itemCount-1)
-	return math.Round(fee*100) / 100
+	return math.Round(fee*1000) / 1000
 }
 
 // ---------- Employee API ----------
@@ -255,7 +255,7 @@ func (s *WarehouseService) GetWallet(accountID uint64, role uint8) (*model.Wareh
 		total += w.Balance
 	}
 	return &model.WarehouseWalletResp{
-		Balance: math.Round(total*100) / 100,
+		Balance: math.Round(total*1000) / 1000,
 	}, nil
 }
 
