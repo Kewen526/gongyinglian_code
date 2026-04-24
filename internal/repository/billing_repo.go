@@ -161,7 +161,7 @@ func (r *BillingRepo) ProcessRefund(accountID uint64, tradeUID, tradeNo, platfor
 		if err != nil {
 			return fmt.Errorf("get wallet: %w", err)
 		}
-		newBalance := math.Round((w.Balance+amount)*100) / 100
+		newBalance := math.Round((w.Balance+amount)*1000) / 1000
 
 		rec := &model.BillingRecord{
 			FlowNo:         flowNo,
@@ -171,10 +171,10 @@ func (r *BillingRepo) ProcessRefund(accountID uint64, tradeUID, tradeNo, platfor
 			Platform:       platform,
 			ShopName:       shopName,
 			Type:           "refund",
-			ActualAmount:   amount,
+			ActualAmount:   model.Float3(amount),
 			Status:         "success",
-			BalanceBefore:  w.Balance,
-			BalanceAfter:   newBalance,
+			BalanceBefore:  model.Float3(w.Balance),
+			BalanceAfter:   model.Float3(newBalance),
 			MarkApprovedAt: markApprovedAt,
 		}
 
@@ -273,7 +273,7 @@ func (r *BillingRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amoun
 			Where("account_id = ?", accountID).First(&w).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			balanceBefore = 0
-			balanceAfter = math.Round(amount*100) / 100
+			balanceAfter = math.Round(amount*1000) / 1000
 			rate, level := model.CalcDiscount(amount)
 			if err := tx.Create(&model.Wallet{
 				AccountID:    accountID,
@@ -287,7 +287,7 @@ func (r *BillingRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amoun
 			return err
 		} else {
 			balanceBefore = w.Balance
-			balanceAfter = math.Round((w.Balance+amount)*100) / 100
+			balanceAfter = math.Round((w.Balance+amount)*1000) / 1000
 			if err := tx.Model(&model.Wallet{}).
 				Where("account_id = ?", accountID).
 				Update("balance", balanceAfter).Error; err != nil {
@@ -301,10 +301,10 @@ func (r *BillingRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amoun
 			AccountID:     accountID,
 			Type:          "recharge",
 			Status:        "success",
-			ActualAmount:  amount,
+			ActualAmount:  model.Float3(amount),
 			DiscountRate:  1.0,
-			BalanceBefore: balanceBefore,
-			BalanceAfter:  balanceAfter,
+			BalanceBefore: model.Float3(balanceBefore),
+			BalanceAfter:  model.Float3(balanceAfter),
 		}).Error
 	})
 }

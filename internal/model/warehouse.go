@@ -46,12 +46,12 @@ type WarehouseBillingRecord struct {
 	ShopName      string    `json:"shop_name" gorm:"type:varchar(128);comment:店铺名"`
 	BusinessType  string    `json:"business_type" gorm:"type:varchar(32);default:'订单发货';comment:业务类型"`
 	Type          string    `json:"type" gorm:"type:varchar(16);default:'deduct';comment:deduct/recharge"`
-	ShippingFee   float64   `json:"shipping_fee" gorm:"type:decimal(12,3);default:0;comment:运费"`
-	PackingFee    float64   `json:"packing_fee" gorm:"type:decimal(12,3);default:0;comment:打包费"`
-	TotalAmount   float64   `json:"total_amount" gorm:"type:decimal(12,3);default:0;comment:总扣款金额"`
+	ShippingFee   Float3    `json:"shipping_fee" gorm:"type:decimal(12,3);default:0;comment:运费"`
+	PackingFee    Float3    `json:"packing_fee" gorm:"type:decimal(12,3);default:0;comment:打包费"`
+	TotalAmount   Float3    `json:"total_amount" gorm:"type:decimal(12,3);default:0;comment:总扣款金额"`
 	ItemCount     int       `json:"item_count" gorm:"type:int;default:0;comment:总件数"`
-	BalanceBefore float64   `json:"balance_before" gorm:"type:decimal(12,3);default:0;comment:扣前余额"`
-	BalanceAfter  float64   `json:"balance_after" gorm:"type:decimal(12,3);default:0;comment:扣后余额"`
+	BalanceBefore Float3    `json:"balance_before" gorm:"type:decimal(12,3);default:0;comment:扣前余额"`
+	BalanceAfter  Float3    `json:"balance_after" gorm:"type:decimal(12,3);default:0;comment:扣后余额"`
 	Status        string    `json:"status" gorm:"type:varchar(16);comment:success/insufficient"`
 	TradeTime     *time.Time `json:"trade_time" gorm:"comment:交易时间(发货时间)"`
 	CreatedAt     time.Time `json:"created_at"`
