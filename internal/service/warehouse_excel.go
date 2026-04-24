@@ -45,13 +45,13 @@ func buildWarehouseExcel(records []model.WarehouseBillingRecord, accountMap map[
 			rec.TradeNo,
 			rec.BusinessType,
 			typeLabel,
-			rec.ShippingFee,
-			rec.PackingFee,
-			rec.TotalAmount,
+			float64(rec.ShippingFee),
+			float64(rec.PackingFee),
+			float64(rec.TotalAmount),
 			rec.ItemCount,
 			rec.Status,
-			rec.BalanceBefore,
-			rec.BalanceAfter,
+			float64(rec.BalanceBefore),
+			float64(rec.BalanceAfter),
 		}
 		for j, v := range values {
 			cell, _ := excelize.CoordinatesToCellName(j+1, row)
@@ -105,12 +105,12 @@ func buildMyWarehouseExcel(records []model.WarehouseBillingRecord) ([]byte, erro
 			rec.TradeNo,
 			rec.BusinessType,
 			typeLabel,
-			rec.ShippingFee,
-			rec.PackingFee,
-			rec.TotalAmount,
+			float64(rec.ShippingFee),
+			float64(rec.PackingFee),
+			float64(rec.TotalAmount),
 			rec.ItemCount,
 			rec.Status,
-			rec.BalanceAfter,
+			float64(rec.BalanceAfter),
 		}
 		for j, v := range values {
 			cell, _ := excelize.CoordinatesToCellName(j+1, row)

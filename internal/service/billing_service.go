@@ -153,13 +153,13 @@ func (s *BillingService) processRefund(trade *model.OrderTrade) error {
 		trade.SourcePlatform,
 		trade.ShopName,
 		refundFlowNo,
-		deductRec.ActualAmount,
+		float64(deductRec.ActualAmount),
 		trade.MarkApprovedAt,
 	); err != nil {
 		return err
 	}
 
-	log.Printf("[Billing] Refunded trade=%s amount=%.3f accountID=%d\n", trade.TradeNo, deductRec.ActualAmount, accountID)
+	log.Printf("[Billing] Refunded trade=%s amount=%.3f accountID=%d\n", trade.TradeNo, float64(deductRec.ActualAmount), accountID)
 	return nil
 }
 
@@ -285,8 +285,8 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 		// these are investigated manually.
 		rec.Status = "error"
 		rec.ErrorMsg = calcErr.Error()
-		rec.BalanceBefore = wallet.Balance
-		rec.BalanceAfter = wallet.Balance
+		rec.BalanceBefore = model.Float3(wallet.Balance)
+		rec.BalanceAfter = model.Float3(wallet.Balance)
 		_ = s.billingRepo.DB().Create(rec).Error
 		_ = s.orderRepo.UpdateBillingStatus(trade.UID, model.BillingStatusError)
 		return nil
@@ -306,7 +306,7 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 	}
 	previewActual := math.Round(originalAmount*previewRate*1000) / 1000
 
-	rec.OriginalAmount = originalAmount
+	rec.OriginalAmount = model.Float3(originalAmount)
 
 	if wallet.Balance < previewActual {
 		// Fast-path insufficient check (uses preview rate — conservative but safe).
@@ -349,10 +349,10 @@ func (s *BillingService) ProcessDeduction(trade *model.OrderTrade) error {
 		}
 		newBalance := math.Round((w.Balance-actual)*1000) / 1000
 		rec.DiscountRate = effectiveRate
-		rec.DiscountAmount = math.Round((originalAmount-actual)*1000) / 1000
-		rec.ActualAmount = actual
-		rec.BalanceBefore = w.Balance
-		rec.BalanceAfter = newBalance
+		rec.DiscountAmount = model.Float3(math.Round((originalAmount-actual)*1000) / 1000)
+		rec.ActualAmount = model.Float3(actual)
+		rec.BalanceBefore = model.Float3(w.Balance)
+		rec.BalanceAfter = model.Float3(newBalance)
 		if err := s.billingRepo.CreateBillingRecord(tx, rec); err != nil {
 			return err
 		}

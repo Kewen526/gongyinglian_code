@@ -71,13 +71,13 @@ func buildBillingExcel(records []model.BillingRecord, accountMap map[uint64]repo
 			rec.TradeNo,
 			rec.FlowNo,
 			typeLabel(rec.Type),
-			rec.OriginalAmount,
+			float64(rec.OriginalAmount),
 			rec.DiscountRate,
-			rec.DiscountAmount,
-			rec.ActualAmount,
+			float64(rec.DiscountAmount),
+			float64(rec.ActualAmount),
 			statusLabel(rec.Status),
-			rec.BalanceBefore,
-			rec.BalanceAfter,
+			float64(rec.BalanceBefore),
+			float64(rec.BalanceAfter),
 		}
 		for j, v := range values {
 			cell, _ := excelize.CoordinatesToCellName(j+1, row)
@@ -129,8 +129,8 @@ func buildMyBillingExcel(records []model.BillingRecord) ([]byte, error) {
 			rec.TradeNo,
 			typeLabel(rec.Type),
 			statusLabel(rec.Status),
-			rec.ActualAmount,
-			rec.BalanceAfter,
+			float64(rec.ActualAmount),
+			float64(rec.BalanceAfter),
 		}
 		for j, v := range values {
 			cell, _ := excelize.CoordinatesToCellName(j+1, row)

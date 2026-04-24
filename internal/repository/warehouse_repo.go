@@ -91,7 +91,7 @@ func (r *WarehouseRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amo
 			Where("account_id = ?", accountID).First(&w).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			balanceBefore = 0
-			balanceAfter = math.Round(amount*100) / 100
+			balanceAfter = math.Round(amount*1000) / 1000
 			if err := tx.Create(&model.WarehouseWallet{
 				AccountID: accountID,
 				Balance:   balanceAfter,
@@ -102,7 +102,7 @@ func (r *WarehouseRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amo
 			return err
 		} else {
 			balanceBefore = w.Balance
-			balanceAfter = math.Round((w.Balance+amount)*100) / 100
+			balanceAfter = math.Round((w.Balance+amount)*1000) / 1000
 			if err := tx.Model(&model.WarehouseWallet{}).
 				Where("account_id = ?", accountID).
 				Update("balance", balanceAfter).Error; err != nil {
@@ -121,10 +121,10 @@ func (r *WarehouseRepo) ApproveRecharge(rechargeID uint64, accountID uint64, amo
 			TradeUID:      fmt.Sprintf("RECHARGE-%d", rechargeID),
 			Type:          "recharge",
 			BusinessType:  "充值",
-			TotalAmount:   amount,
+			TotalAmount:   model.Float3(amount),
 			Status:        "success",
-			BalanceBefore: balanceBefore,
-			BalanceAfter:  balanceAfter,
+			BalanceBefore: model.Float3(balanceBefore),
+			BalanceAfter:  model.Float3(balanceAfter),
 		}).Error
 	})
 }

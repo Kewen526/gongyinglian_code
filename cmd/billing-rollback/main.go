@@ -372,9 +372,9 @@ func loadEvents(db *gorm.DB, system string, accountID uint64) []Event {
 		for _, r := range recs {
 			events = append(events, Event{
 				RecordID: r.ID, System: "billing", Type: r.Type, Status: r.Status,
-				Amount: r.ActualAmount, CreatedAt: r.CreatedAt,
+				Amount: float64(r.ActualAmount), CreatedAt: r.CreatedAt,
 				TradeUID: r.TradeUID, TradeNo: r.TradeNo, FlowNo: r.FlowNo,
-				BalBefore: r.BalanceBefore, BalAfter: r.BalanceAfter,
+				BalBefore: float64(r.BalanceBefore), BalAfter: float64(r.BalanceAfter),
 			})
 		}
 	case "warehouse":
@@ -386,9 +386,9 @@ func loadEvents(db *gorm.DB, system string, accountID uint64) []Event {
 		for _, r := range recs {
 			events = append(events, Event{
 				RecordID: r.ID, System: "warehouse", Type: r.Type, Status: r.Status,
-				Amount: r.TotalAmount, CreatedAt: r.CreatedAt,
+				Amount: float64(r.TotalAmount), CreatedAt: r.CreatedAt,
 				TradeUID: r.TradeUID, TradeNo: r.TradeNo, FlowNo: r.FlowNo,
-				BalBefore: r.BalanceBefore, BalAfter: r.BalanceAfter,
+				BalBefore: float64(r.BalanceBefore), BalAfter: float64(r.BalanceAfter),
 			})
 		}
 	}
