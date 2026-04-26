@@ -29,7 +29,7 @@ const (
 	// Foreign trade (跨境) API paths — prefix /cerp instead of /erp
 	foreignSyncKey        = "order_sync_foreign"
 	foreignTradeListPath  = "/cerp/openorder/query/list/trades"
-	foreignRemarkPath     = "/cerp/openorder/remark/modify/remark"
+	foreignTagMarkPath    = "/cerp/openorder/tag/add/mark"
 	foreignAfterSalePath  = "/cerp/after_sales/bill/query"
 
 	// foreignAfterSaleTypeReturn and foreignAfterSaleProblemReason are the filter
@@ -1647,20 +1647,16 @@ func (s *SyncService) fetchForeignAfterSalePage(page, limit int, startTime, endT
 
 // ==================== Foreign Trade Mark (已审核) ====================
 
-// pushForeignRemarkApproved sets printable_remark="已审核" on a single foreign trade order.
-// The cross-border remark API (/cerp/openorder/remark/modify/remark) is per-order only.
+// pushForeignRemarkApproved adds the approval tag (tag_value=30000) on a single foreign trade order.
+// The cross-border tag API (/cerp/openorder/tag/add/mark) is per-order only.
 func (s *SyncService) pushForeignRemarkApproved(tradeNo string) error {
 	timestampMs := strconv.FormatInt(time.Now().UnixMilli(), 10)
 
 	allParams := map[string]string{
-		"bill_code":        tradeNo,
-		"printable_remark": model.MarkApproved,
-		"seller_remark":    "",
-		"buyer_comments":   "",
-		"system_remark":    "",
-		"_app":             s.cfg.AppKey,
-		"_t":               timestampMs,
-		"_s":               "",
+		"bill_code":  tradeNo,
+		"tag_value":  "30000",
+		"_app":       s.cfg.AppKey,
+		"_t":         timestampMs,
 	}
 	allParams["_sign"] = buildForeignSign(allParams, s.cfg.Secret)
 
@@ -1670,7 +1666,7 @@ func (s *SyncService) pushForeignRemarkApproved(tradeNo string) error {
 	}
 
 	resp, err := wanLiNiuClient.Post(
-		s.cfg.BaseURL+foreignRemarkPath,
+		s.cfg.BaseURL+foreignTagMarkPath,
 		"application/x-www-form-urlencoded",
 		strings.NewReader(form.Encode()),
 	)
