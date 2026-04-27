@@ -167,6 +167,14 @@ func SetupRouter(
 		warehouseGroup.GET("/warehouse/billing/export", warehouseHandler.ExportBillingRecords)
 	}
 
+	// --- Admin Account Payment Info (super admin only) ---
+	adminAccount := auth.Group("/admin/accounts")
+	adminAccount.Use(middleware.RequireSuperAdmin())
+	{
+		adminAccount.GET("/:id/payment-info", accountHandler.AdminGetPaymentInfo)
+		adminAccount.PUT("/:id/payment-info", accountHandler.AdminSavePaymentInfo)
+	}
+
 	// --- Admin Finance Center (super admin only) ---
 	adminFinance := auth.Group("/admin/finance")
 	adminFinance.Use(middleware.RequireSuperAdmin())

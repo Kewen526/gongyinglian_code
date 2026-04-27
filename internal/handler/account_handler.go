@@ -258,6 +258,42 @@ func (h *AccountHandler) SaveMyPaymentInfo(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// GET /api/v1/admin/accounts/:id/payment-info
+// 超级管理员查看指定团队负责人的收款信息。
+func (h *AccountHandler) AdminGetPaymentInfo(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的账号ID")
+		return
+	}
+	info, err := h.svc.GetMyPaymentInfo(id)
+	if err != nil {
+		response.InternalError(c, "查询收款信息失败")
+		return
+	}
+	response.Success(c, info)
+}
+
+// PUT /api/v1/admin/accounts/:id/payment-info
+// 超级管理员为指定团队负责人保存收款信息。
+func (h *AccountHandler) AdminSavePaymentInfo(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "无效的账号ID")
+		return
+	}
+	var req model.SavePaymentInfoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误")
+		return
+	}
+	if err := h.svc.SavePaymentInfo(id, &req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
 // GET /api/v1/payment-info/leader
 // 仅员工可调用，返回所属团队负责人的收款信息。
 func (h *AccountHandler) GetLeaderPaymentInfo(c *gin.Context) {
