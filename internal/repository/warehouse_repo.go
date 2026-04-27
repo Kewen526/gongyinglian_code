@@ -384,11 +384,13 @@ func (r *WarehouseRepo) GetAccountInfoByIDs(ids []uint64) (map[uint64]AccountBas
 // ---------- Order queries for warehouse deduction ----------
 
 // ListPendingWarehouseOrders returns orders that need warehouse deduction.
+// Includes both domestic (process_status=8) and foreign (process_status=80) shipped orders.
 func (r *WarehouseRepo) ListPendingWarehouseOrders() ([]model.OrderTrade, error) {
 	var trades []model.OrderTrade
 	err := r.db.Where(
-		"process_status = ? AND warehouse_status = ?",
-		8, model.WarehouseStatusPending,
+		"process_status IN ? AND warehouse_status = ?",
+		[]int{model.ProcessStatusSent, model.ProcessStatusForeignSent},
+		model.WarehouseStatusPending,
 	).Limit(500).Find(&trades).Error
 	return trades, err
 }

@@ -37,7 +37,8 @@ const (
 	ProcessStatusWeigh           = 3  // 称重
 	ProcessStatusPendingSend     = 4  // 待发货
 	ProcessStatusFinanceAudit    = 5  // 财审
-	ProcessStatusSent            = 8  // 已发货
+	ProcessStatusSent            = 8  // 已发货（内贸）
+	ProcessStatusForeignSent     = 80 // 已发货（外贸）
 	ProcessStatusSuccess         = 9  // 成功
 	ProcessStatusClosed          = 10 // 关闭
 	ProcessStatusExceptionEnd    = 11 // 异常结束
@@ -329,6 +330,8 @@ func GetProcessStatusLabel(ps int) string {
 		return "财审"
 	case ProcessStatusSent:
 		return "已发货"
+	case ProcessStatusForeignSent:
+		return "已发货"
 	case ProcessStatusSuccess:
 		return "已完成"
 	case ProcessStatusClosed:
@@ -361,6 +364,7 @@ func GetAllProcessStatusOptions() []StatusOption {
 		{Value: ProcessStatusPendingSend, Label: "待发货"},
 		{Value: ProcessStatusFinanceAudit, Label: "财审"},
 		{Value: ProcessStatusSent, Label: "已发货"},
+		{Value: ProcessStatusForeignSent, Label: "已发货（外贸）"},
 		{Value: ProcessStatusSuccess, Label: "已完成"},
 		{Value: ProcessStatusClosed, Label: "已关闭"},
 		{Value: ProcessStatusPacking, Label: "打包"},
