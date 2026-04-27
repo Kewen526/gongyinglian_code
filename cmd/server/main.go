@@ -90,9 +90,9 @@ func main() {
 	initSuperAdmin(db)
 	initModules(db)
 
-	// ---------- Tencent Cloud COS ----------
-	oss.InitCOS(&cfg.COS)
-	log.Println("[COS] Initialized")
+	// ---------- Alibaba Cloud OSS ----------
+	oss.InitOSS(&cfg.OSS)
+	log.Println("[OSS] Initialized")
 
 	// ---------- Elasticsearch ----------
 	if err := es.InitES(&cfg.Elasticsearch); err != nil {
