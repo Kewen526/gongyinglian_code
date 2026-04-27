@@ -16,9 +16,8 @@ jwt:
   secret: "supply-chain-jwt-secret-key-change-in-production"
   expire_hour: 24
 
-cos:
-  secret_id: "your-secret-id"
-  secret_key: "your-secret-key"
-  region: "ap-beijing"
-  bucket: "your-bucket-name"
-  base_url: ""
+oss:
+  access_key_id: "your-access-key-id"
+  access_key_secret: "your-access-key-secret"
+  endpoint: "oss-cn-beijing.aliyuncs.com"
+  bucket: "fasvio"

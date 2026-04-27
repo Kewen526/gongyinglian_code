@@ -9,7 +9,7 @@ type Config struct {
 	Server        ServerConfig        `json:"server"`
 	MySQL         MySQLConfig         `json:"mysql"`
 	Elasticsearch ElasticsearchConfig `json:"elasticsearch"`
-	COS           COSConfig           `json:"cos"`
+	OSS           OSSConfig           `json:"oss"`
 	JWT           JWTConfig           `json:"jwt"`
 	WanLiNiu      WanLiNiuConfig      `json:"wanliniu"`
 	Security      SecurityConfig      `json:"security"`
@@ -52,12 +52,11 @@ type ElasticsearchConfig struct {
 	ProductIndex string   `json:"product_index"`
 }
 
-type COSConfig struct {
-	SecretID  string `json:"secret_id"`
-	SecretKey string `json:"secret_key"`
-	Region    string `json:"region"`
-	Bucket    string `json:"bucket"`
-	BaseURL   string `json:"base_url"`
+type OSSConfig struct {
+	AccessKeyID     string `json:"access_key_id"`
+	AccessKeySecret string `json:"access_key_secret"`
+	Endpoint        string `json:"endpoint"`
+	Bucket          string `json:"bucket"`
 }
 
 var GlobalConfig *Config
@@ -89,12 +88,11 @@ func DefaultConfig() *Config {
 			Addresses:    []string{"http://127.0.0.1:9200"},
 			ProductIndex: "products",
 		},
-		COS: COSConfig{
-			SecretID:  "",
-			SecretKey: "",
-			Region:    "ap-beijing",
-			Bucket:    "",
-			BaseURL:   "",
+		OSS: OSSConfig{
+			AccessKeyID:     "",
+			AccessKeySecret: "",
+			Endpoint:        "oss-cn-beijing.aliyuncs.com",
+			Bucket:          "fasvio",
 		},
 		JWT: JWTConfig{
 			Secret:     "supply-chain-jwt-secret-key-change-in-production",
