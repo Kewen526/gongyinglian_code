@@ -65,6 +65,13 @@ func SetupRouter(
 	// --- Modules (any logged-in user) ---
 	auth.GET("/modules", accountHandler.GetAllModules)
 
+	// --- Payment Info ---
+	// Team leader: get/save own payment collection info
+	auth.GET("/payment-info", accountHandler.GetMyPaymentInfo)
+	auth.PUT("/payment-info", accountHandler.SaveMyPaymentInfo)
+	// Employee: get their team leader's payment info (for recharge display)
+	auth.GET("/payment-info/leader", accountHandler.GetLeaderPaymentInfo)
+
 	// --- Product: view permission ---
 	productView := auth.Group("")
 	productView.Use(middleware.RequireModulePermission(accountRepo, "product", false))

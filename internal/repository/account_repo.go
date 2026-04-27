@@ -248,3 +248,55 @@ func (r *AccountRepo) ListSubordinateAccounts(parentID uint64) ([]model.Account,
 	err = r.db.Where("id IN ?", descendantIDs).Order("id ASC").Find(&accounts).Error
 	return accounts, err
 }
+
+// ---------- TeamLeaderPaymentInfo ----------
+
+// GetPaymentInfoByAccountID returns the payment info for the given team leader account.
+// Returns nil, nil if not configured yet.
+func (r *AccountRepo) GetPaymentInfoByAccountID(accountID uint64) (*model.TeamLeaderPaymentInfo, error) {
+	var info model.TeamLeaderPaymentInfo
+	err := r.db.Where("account_id = ?", accountID).First(&info).Error
+	if err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// UpsertPaymentInfo creates or fully replaces the payment info for a team leader.
+func (r *AccountRepo) UpsertPaymentInfo(info *model.TeamLeaderPaymentInfo) error {
+	var existing model.TeamLeaderPaymentInfo
+	err := r.db.Where("account_id = ?", info.AccountID).First(&existing).Error
+	if err != nil {
+		return r.db.Create(info).Error
+	}
+	return r.db.Model(&existing).Updates(map[string]interface{}{
+		"corp_bank_name":        info.CorpBankName,
+		"corp_account_name":     info.CorpAccountName,
+		"corp_account_no":       info.CorpAccountNo,
+		"personal_bank_name":    info.PersonalBankName,
+		"personal_account_name": info.PersonalAccountName,
+		"personal_account_no":   info.PersonalAccountNo,
+		"alipay_qr":             info.AlipayQR,
+		"wechat_qr":             info.WechatQR,
+	}).Error
+}
+
+// FindTeamLeaderByDescendantID walks the parent chain of the given account
+// and returns the first ancestor (or self) with role = RoleTeamLead.
+func (r *AccountRepo) FindTeamLeaderByDescendantID(accountID uint64) (*model.Account, error) {
+	current := accountID
+	for depth := 0; depth < 10; depth++ {
+		acc, err := r.GetByID(current)
+		if err != nil {
+			return nil, err
+		}
+		if acc.Role == model.RoleTeamLead {
+			return acc, nil
+		}
+		if acc.ParentID == nil {
+			return nil, nil // no team leader in chain
+		}
+		current = *acc.ParentID
+	}
+	return nil, nil
+}

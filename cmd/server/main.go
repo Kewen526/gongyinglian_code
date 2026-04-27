@@ -77,6 +77,7 @@ func main() {
 		&model.WarehouseBillingRecord{},
 		&model.WarehouseFlowCounter{},
 		&model.WlnGoodsSpecCache{},
+		&model.TeamLeaderPaymentInfo{},
 	); err != nil {
 		log.Fatalf("Failed to auto-migrate tables: %v", err)
 	}

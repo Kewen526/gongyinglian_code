@@ -217,3 +217,60 @@ func (h *AccountHandler) UpdatePermissions(c *gin.Context) {
 	}
 	response.Success(c, nil)
 }
+
+// ---------- Payment Info ----------
+
+// GET /api/v1/payment-info
+// 仅团队负责人可调用，返回自己配置的收款信息（未配置时返回空结构体）。
+func (h *AccountHandler) GetMyPaymentInfo(c *gin.Context) {
+	_, role := getCallerInfo(c)
+	if role != model.RoleTeamLead {
+		response.Forbidden(c, "仅团队负责人可查看收款信息")
+		return
+	}
+	accountID := c.GetUint64("account_id")
+	info, err := h.svc.GetMyPaymentInfo(accountID)
+	if err != nil {
+		response.InternalError(c, "查询收款信息失败")
+		return
+	}
+	response.Success(c, info)
+}
+
+// PUT /api/v1/payment-info
+// 仅团队负责人可调用，保存收款信息。主管不可操作。
+func (h *AccountHandler) SaveMyPaymentInfo(c *gin.Context) {
+	_, role := getCallerInfo(c)
+	if role != model.RoleTeamLead {
+		response.Forbidden(c, "仅团队负责人可配置收款信息")
+		return
+	}
+	accountID := c.GetUint64("account_id")
+	var req model.SavePaymentInfoReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "参数错误")
+		return
+	}
+	if err := h.svc.SavePaymentInfo(accountID, &req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
+// GET /api/v1/payment-info/leader
+// 仅员工可调用，返回所属团队负责人的收款信息。
+func (h *AccountHandler) GetLeaderPaymentInfo(c *gin.Context) {
+	_, role := getCallerInfo(c)
+	if role != model.RoleEmployee {
+		response.Forbidden(c, "仅员工可查看团队负责人收款信息")
+		return
+	}
+	accountID := c.GetUint64("account_id")
+	info, err := h.svc.GetLeaderPaymentInfo(accountID)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, info)
+}

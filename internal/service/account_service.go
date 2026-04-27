@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"supply-chain/internal/model"
 	"supply-chain/internal/repository"
 
@@ -522,4 +523,88 @@ func (s *AccountService) UpdatePermissions(accountID uint64, req *model.UpdatePe
 	}
 
 	return s.repo.ReplacePermissions(accountID, perms)
+}
+
+// ---------- TeamLeaderPaymentInfo ----------
+
+// GetMyPaymentInfo returns the payment info for the calling team leader.
+// Returns a zero-value struct (not an error) when not configured yet.
+func (s *AccountService) GetMyPaymentInfo(accountID uint64) (*model.TeamLeaderPaymentInfo, error) {
+	info, err := s.repo.GetPaymentInfoByAccountID(accountID)
+	if err != nil {
+		// Not found → return empty struct so the frontend can pre-fill the form
+		return &model.TeamLeaderPaymentInfo{AccountID: accountID}, nil
+	}
+	return info, nil
+}
+
+// SavePaymentInfo validates and persists payment info for a team leader.
+func (s *AccountService) SavePaymentInfo(accountID uint64, req *model.SavePaymentInfoReq) error {
+	if err := validatePaymentInfoReq(req); err != nil {
+		return err
+	}
+	info := &model.TeamLeaderPaymentInfo{
+		AccountID:           accountID,
+		CorpBankName:        strings.TrimSpace(req.CorpBankName),
+		CorpAccountName:     strings.TrimSpace(req.CorpAccountName),
+		CorpAccountNo:       strings.TrimSpace(req.CorpAccountNo),
+		PersonalBankName:    strings.TrimSpace(req.PersonalBankName),
+		PersonalAccountName: strings.TrimSpace(req.PersonalAccountName),
+		PersonalAccountNo:   strings.TrimSpace(req.PersonalAccountNo),
+		AlipayQR:            strings.TrimSpace(req.AlipayQR),
+		WechatQR:            strings.TrimSpace(req.WechatQR),
+	}
+	return s.repo.UpsertPaymentInfo(info)
+}
+
+// GetLeaderPaymentInfo returns the team leader's payment info for an employee.
+func (s *AccountService) GetLeaderPaymentInfo(employeeID uint64) (*model.TeamLeaderPaymentInfo, error) {
+	leader, err := s.repo.FindTeamLeaderByDescendantID(employeeID)
+	if err != nil {
+		return nil, errors.New("查询团队负责人失败")
+	}
+	if leader == nil {
+		return nil, errors.New("未找到所属团队负责人")
+	}
+	info, err := s.repo.GetPaymentInfoByAccountID(leader.ID)
+	if err != nil {
+		return nil, errors.New("团队负责人尚未配置收款信息")
+	}
+	return info, nil
+}
+
+// validatePaymentInfoReq checks that each bank channel is either fully filled or empty,
+// and that at least one channel is complete.
+func validatePaymentInfoReq(req *model.SavePaymentInfoReq) error {
+	corpFields := []string{req.CorpBankName, req.CorpAccountName, req.CorpAccountNo}
+	corpFilled := countNonEmpty(corpFields)
+	if corpFilled > 0 && corpFilled < 3 {
+		return errors.New("对公银行信息需要完整填写（银行名称、账户名称、账号）")
+	}
+
+	personalFields := []string{req.PersonalBankName, req.PersonalAccountName, req.PersonalAccountNo}
+	personalFilled := countNonEmpty(personalFields)
+	if personalFilled > 0 && personalFilled < 3 {
+		return errors.New("对私银行信息需要完整填写（银行名称、账户名称、账号）")
+	}
+
+	hasCorp     := corpFilled == 3
+	hasPersonal := personalFilled == 3
+	hasAlipay   := strings.TrimSpace(req.AlipayQR) != ""
+	hasWechat   := strings.TrimSpace(req.WechatQR) != ""
+
+	if !hasCorp && !hasPersonal && !hasAlipay && !hasWechat {
+		return errors.New("请至少填写一种完整的收款方式")
+	}
+	return nil
+}
+
+func countNonEmpty(fields []string) int {
+	n := 0
+	for _, f := range fields {
+		if strings.TrimSpace(f) != "" {
+			n++
+		}
+	}
+	return n
 }

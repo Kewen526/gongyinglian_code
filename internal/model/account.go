@@ -133,6 +133,36 @@ type ProductScopeResp struct {
 	HiddenFields []string `json:"hidden_fields"`
 }
 
+// TeamLeaderPaymentInfo stores payment collection info for a team leader.
+// Employees see this when submitting recharge requests.
+type TeamLeaderPaymentInfo struct {
+	ID                  uint64    `json:"id" gorm:"primaryKey;autoIncrement"`
+	AccountID           uint64    `json:"account_id" gorm:"not null;uniqueIndex;comment:团队负责人账号ID"`
+	CorpBankName        string    `json:"corp_bank_name" gorm:"type:varchar(128);not null;default:''"`
+	CorpAccountName     string    `json:"corp_account_name" gorm:"type:varchar(128);not null;default:''"`
+	CorpAccountNo       string    `json:"corp_account_no" gorm:"type:varchar(64);not null;default:''"`
+	PersonalBankName    string    `json:"personal_bank_name" gorm:"type:varchar(128);not null;default:''"`
+	PersonalAccountName string    `json:"personal_account_name" gorm:"type:varchar(128);not null;default:''"`
+	PersonalAccountNo   string    `json:"personal_account_no" gorm:"type:varchar(64);not null;default:''"`
+	AlipayQR            string    `json:"alipay_qr" gorm:"type:varchar(512);not null;default:''"`
+	WechatQR            string    `json:"wechat_qr" gorm:"type:varchar(512);not null;default:''"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+func (TeamLeaderPaymentInfo) TableName() string { return "team_leader_payment_info" }
+
+type SavePaymentInfoReq struct {
+	CorpBankName        string `json:"corp_bank_name"`
+	CorpAccountName     string `json:"corp_account_name"`
+	CorpAccountNo       string `json:"corp_account_no"`
+	PersonalBankName    string `json:"personal_bank_name"`
+	PersonalAccountName string `json:"personal_account_name"`
+	PersonalAccountNo   string `json:"personal_account_no"`
+	AlipayQR            string `json:"alipay_qr"`
+	WechatQR            string `json:"wechat_qr"`
+}
+
 type LoginReq struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
