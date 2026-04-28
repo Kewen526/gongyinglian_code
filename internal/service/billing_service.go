@@ -9,6 +9,7 @@ import (
 	"strings"
 	"supply-chain/internal/model"
 	"supply-chain/internal/repository"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -82,17 +83,17 @@ func (s *BillingService) StartAutoDeduct() {
 	}()
 }
 
+const billingWorkers = 10
+
 func (s *BillingService) autoDeductOnce() {
 	trades, err := s.orderRepo.ListPendingBillingOrders()
 	if err != nil {
 		log.Printf("[Billing] ListPendingBillingOrders error: %v\n", err)
 		return
 	}
-	for _, trade := range trades {
-		if err := s.ProcessDeduction(&trade); err != nil {
-			log.Printf("[Billing] ProcessDeduction trade=%s error: %v\n", trade.TradeNo, err)
-		}
-	}
+	runBillingPool(trades, billingWorkers, func(trade *model.OrderTrade) error {
+		return s.ProcessDeduction(trade)
+	}, "ProcessDeduction")
 }
 
 // StartAutoRefund scans every 5 minutes for orders needing a refund (process_status=99 + billing_status=1).
@@ -120,11 +121,34 @@ func (s *BillingService) autoRefundOnce() {
 		log.Printf("[Billing] ListPendingRefundOrders error: %v\n", err)
 		return
 	}
-	for _, trade := range trades {
-		if err := s.processRefund(&trade); err != nil {
-			log.Printf("[Billing] ProcessRefund trade=%s error: %v\n", trade.TradeNo, err)
-		}
+	runBillingPool(trades, billingWorkers, func(trade *model.OrderTrade) error {
+		return s.processRefund(trade)
+	}, "ProcessRefund")
+}
+
+// runBillingPool processes a slice of trades concurrently with the given number
+// of workers. Each trade is copied into the channel so workers have independent values.
+func runBillingPool(trades []model.OrderTrade, workers int, fn func(*model.OrderTrade) error, label string) {
+	jobs := make(chan model.OrderTrade, workers*2)
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for trade := range jobs {
+				if err := fn(&trade); err != nil {
+					log.Printf("[Billing] %s trade=%s error: %v\n", label, trade.TradeNo, err)
+				}
+			}
+		}()
 	}
+
+	for _, t := range trades {
+		jobs <- t
+	}
+	close(jobs)
+	wg.Wait()
 }
 
 // processRefund handles the full refund for one order.
