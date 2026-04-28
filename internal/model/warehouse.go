@@ -7,6 +7,7 @@ const (
 	WarehouseStatusPending      int8 = 0 // 未扣款
 	WarehouseStatusSuccess      int8 = 1 // 扣款成功
 	WarehouseStatusInsufficient int8 = 2 // 余额不足
+	WarehouseStatusNoEmployee   int8 = 3 // 店铺未绑定员工，永久跳过
 )
 
 // ---------- Database Models ----------

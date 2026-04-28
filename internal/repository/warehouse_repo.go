@@ -383,24 +383,46 @@ func (r *WarehouseRepo) GetAccountInfoByIDs(ids []uint64) (map[uint64]AccountBas
 
 // ---------- Order queries for warehouse deduction ----------
 
-// ListPendingWarehouseOrders returns orders that need warehouse deduction.
-// Includes both domestic (process_status=8) and foreign (process_status=80) shipped orders.
-func (r *WarehouseRepo) ListPendingWarehouseOrders() ([]model.OrderTrade, error) {
-	var trades []model.OrderTrade
-	err := r.db.Where(
-		"process_status IN ? AND warehouse_status = ?",
-		[]int{model.ProcessStatusSent, model.ProcessStatusForeignSent},
-		model.WarehouseStatusPending,
-	).Limit(500).Find(&trades).Error
-	return trades, err
+// StreamPendingOrders streams all pending warehouse orders via a cursor to avoid
+// loading the full result set into memory. fn is called once per row.
+func (r *WarehouseRepo) StreamPendingOrders(fn func(model.OrderTrade)) error {
+	rows, err := r.db.Model(&model.OrderTrade{}).
+		Where(
+			"process_status IN ? AND warehouse_status = ?",
+			[]int{model.ProcessStatusSent, model.ProcessStatusForeignSent},
+			model.WarehouseStatusPending,
+		).Rows()
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var trade model.OrderTrade
+		if err := r.db.ScanRows(rows, &trade); err != nil {
+			return err
+		}
+		fn(trade)
+	}
+	return rows.Err()
 }
 
-// ListInsufficientWarehouseOrders returns orders with warehouse_status=2 for retry.
-func (r *WarehouseRepo) ListInsufficientWarehouseOrders() ([]model.OrderTrade, error) {
-	var trades []model.OrderTrade
-	err := r.db.Where("warehouse_status = ?", model.WarehouseStatusInsufficient).
-		Limit(500).Find(&trades).Error
-	return trades, err
+// StreamInsufficientOrders streams all warehouse_status=2 orders for retry.
+func (r *WarehouseRepo) StreamInsufficientOrders(fn func(model.OrderTrade)) error {
+	rows, err := r.db.Model(&model.OrderTrade{}).
+		Where("warehouse_status = ?", model.WarehouseStatusInsufficient).
+		Rows()
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var trade model.OrderTrade
+		if err := r.db.ScanRows(rows, &trade); err != nil {
+			return err
+		}
+		fn(trade)
+	}
+	return rows.Err()
 }
 
 func (r *WarehouseRepo) UpdateWarehouseStatus(uid string, status int8) error {

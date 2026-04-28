@@ -8,6 +8,7 @@ import (
 	"strings"
 	"supply-chain/internal/model"
 	"supply-chain/internal/repository"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -44,31 +45,39 @@ func (s *WarehouseService) StartAutoDeduct() {
 	}()
 }
 
+const warehouseWorkers = 10
+
 func (s *WarehouseService) autoDeductOnce() {
-	// Process pending orders (process_status=8, warehouse_status=0)
-	pending, err := s.repo.ListPendingWarehouseOrders()
-	if err != nil {
-		log.Printf("[Warehouse] ListPendingWarehouseOrders error: %v\n", err)
-	} else {
-		log.Printf("[Warehouse] Found %d pending orders to process\n", len(pending))
-		for i := range pending {
-			if err := s.processDeduction(&pending[i]); err != nil {
-				log.Printf("[Warehouse] Deduction trade=%s error: %v\n", pending[i].TradeNo, err)
+	s.runWorkerPool(s.repo.StreamPendingOrders, "pending")
+	s.runWorkerPool(s.repo.StreamInsufficientOrders, "insufficient-retry")
+}
+
+// runWorkerPool streams orders from the given source and processes them with
+// warehouseWorkers concurrent goroutines. The channel acts as a bounded buffer
+// so the stream and workers stay in lock-step without excessive memory use.
+func (s *WarehouseService) runWorkerPool(stream func(func(model.OrderTrade)) error, label string) {
+	jobs := make(chan model.OrderTrade, warehouseWorkers*2)
+	var wg sync.WaitGroup
+
+	for i := 0; i < warehouseWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for trade := range jobs {
+				if err := s.processDeduction(&trade); err != nil {
+					log.Printf("[Warehouse] %s trade=%s error: %v\n", label, trade.TradeNo, err)
+				}
 			}
-		}
+		}()
 	}
 
-	// Retry insufficient orders
-	insufficient, err := s.repo.ListInsufficientWarehouseOrders()
-	if err != nil {
-		log.Printf("[Warehouse] ListInsufficientWarehouseOrders error: %v\n", err)
-		return
+	if err := stream(func(trade model.OrderTrade) {
+		jobs <- trade
+	}); err != nil {
+		log.Printf("[Warehouse] %s stream error: %v\n", label, err)
 	}
-	for i := range insufficient {
-		if err := s.processDeduction(&insufficient[i]); err != nil {
-			log.Printf("[Warehouse] Retry trade=%s error: %v\n", insufficient[i].TradeNo, err)
-		}
-	}
+	close(jobs)
+	wg.Wait()
 }
 
 // ---------- Core deduction ----------
@@ -80,7 +89,8 @@ func (s *WarehouseService) processDeduction(trade *model.OrderTrade) error {
 
 	accountID, err := s.repo.ResolveEmployeeAccountID(trade.SysShop)
 	if err != nil || accountID == 0 {
-		log.Printf("[Warehouse] Skip trade=%s sysShop=%s: no employee found (accountID=%d, err=%v)\n", trade.TradeNo, trade.SysShop, accountID, err)
+		log.Printf("[Warehouse] Skip trade=%s sysShop=%s: no employee, marked as skipped\n", trade.TradeNo, trade.SysShop)
+		_ = s.repo.UpdateWarehouseStatus(trade.UID, model.WarehouseStatusNoEmployee)
 		return nil
 	}
 
