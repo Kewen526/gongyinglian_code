@@ -4,37 +4,23 @@
 # 使用方式: bash deploy.sh
 #
 # 前置要求:
-#   1. 服务器已安装 Go 1.21+
-#   2. 服务器已安装 MySQL 并已执行 docs/schema.sql 建表
+#   1. 服务器已安装 Go 1.21+（脚本会自动安装）
+#   2. 服务器已安装 MySQL 并已创建 supply_chain 数据库
 #   3. 服务器已安装 Elasticsearch（可选，不装则搜索功能不可用）
 #   4. 服务器已安装 git
+#   5. configs/config.json 已存在（首次部署需手动创建）
 #
 
 set -e
 
 # ============================================================
-# 配置区 - 根据你的服务器实际情况修改
+# 配置区
 # ============================================================
 REPO_URL="https://github.com/Kewen526/gongyinglian_code.git"
 BRANCH="main"
 DEPLOY_DIR="/opt/supply-chain"
 APP_NAME="supply-chain"
 APP_PORT=8080
-
-# MySQL 配置
-MYSQL_USER="root"
-MYSQL_PASS="password"
-MYSQL_HOST="127.0.0.1"
-MYSQL_PORT="3306"
-MYSQL_DB="supply_chain"
-
-# Elasticsearch 配置
-ES_HOST="http://127.0.0.1:9200"
-ES_USER="elastic"
-ES_PASS="prU_ai0Bfl95K-J5Zq*-"
-
-# JWT 配置
-JWT_SECRET="supply-chain-jwt-$(openssl rand -hex 16)"
 
 # ============================================================
 # 开始部署
@@ -46,9 +32,9 @@ echo "=========================================="
 
 # 1. 检查 Go 环境
 echo ""
-echo "[1/7] 检查 Go 环境..."
+echo "[1/6] 检查 Go 环境..."
 if ! command -v go &> /dev/null; then
-    echo "❌ Go 未安装，正在安装 Go 1.21..."
+    echo "Go 未安装，正在安装 Go 1.21..."
     wget -q https://go.dev/dl/go1.21.13.linux-amd64.tar.gz -O /tmp/go.tar.gz
     sudo rm -rf /usr/local/go
     sudo tar -C /usr/local -xzf /tmp/go.tar.gz
@@ -62,7 +48,7 @@ fi
 
 # 2. 拉取代码
 echo ""
-echo "[2/7] 拉取代码..."
+echo "[2/6] 拉取代码..."
 if [ -d "$DEPLOY_DIR" ]; then
     echo "   目录已存在，拉取最新代码..."
     cd "$DEPLOY_DIR"
@@ -77,46 +63,20 @@ else
 fi
 echo "✅ 代码已更新到最新"
 
-# 3. 生成配置文件
+# 3. 检查配置文件（不自动生成，保留已有配置）
 echo ""
-echo "[3/7] 生成配置文件..."
-MYSQL_DSN="${MYSQL_USER}:${MYSQL_PASS}@tcp(${MYSQL_HOST}:${MYSQL_PORT})/${MYSQL_DB}?charset=utf8mb4&parseTime=True&loc=Local"
-
-cat > "${DEPLOY_DIR}/configs/config.json" <<CFGEOF
-{
-  "server": {
-    "port": ${APP_PORT}
-  },
-  "mysql": {
-    "dsn": "${MYSQL_DSN}",
-    "max_open_conns": 100,
-    "max_idle_conns": 20,
-    "conn_max_lifetime_minutes": 30
-  },
-  "elasticsearch": {
-    "addresses": ["${ES_HOST}"],
-    "username": "${ES_USER}",
-    "password": "${ES_PASS}",
-    "product_index": "products"
-  },
-  "jwt": {
-    "secret": "${JWT_SECRET}",
-    "expire_hour": 24
-  },
-  "cos": {
-    "secret_id": "",
-    "secret_key": "",
-    "region": "ap-beijing",
-    "bucket": "",
-    "base_url": ""
-  }
-}
-CFGEOF
-echo "✅ 配置文件已生成: configs/config.json"
+echo "[3/6] 检查配置文件..."
+if [ -f "${DEPLOY_DIR}/configs/config.json" ]; then
+    echo "✅ 配置文件已存在，跳过生成: configs/config.json"
+else
+    echo "❌ 未找到 configs/config.json"
+    echo "   请将配置文件放到 ${DEPLOY_DIR}/configs/config.json 后重新运行"
+    exit 1
+fi
 
 # 4. 下载依赖 & 编译
 echo ""
-echo "[4/7] 下载依赖并编译..."
+echo "[4/6] 下载依赖并编译..."
 cd "$DEPLOY_DIR"
 export GOPROXY=https://goproxy.cn,direct
 go mod tidy
@@ -125,11 +85,11 @@ echo "✅ 编译完成: ${DEPLOY_DIR}/${APP_NAME}"
 
 # 5. 创建 systemd 服务
 echo ""
-echo "[5/7] 创建系统服务..."
+echo "[5/6] 创建系统服务..."
 sudo tee /etc/systemd/system/${APP_NAME}.service > /dev/null <<SVCEOF
 [Unit]
 Description=Supply Chain Management System
-After=network.target mysql.service
+After=network.target mysqld.service
 
 [Service]
 Type=simple
@@ -151,7 +111,7 @@ echo "✅ 系统服务已创建"
 
 # 6. 启动服务
 echo ""
-echo "[6/7] 启动服务..."
+echo "[6/6] 启动服务..."
 sudo systemctl stop ${APP_NAME} 2>/dev/null || true
 sudo systemctl enable ${APP_NAME}
 sudo systemctl start ${APP_NAME}
@@ -165,19 +125,10 @@ else
     exit 1
 fi
 
-# 7. 验证
-echo ""
-echo "[7/7] 验证服务..."
+# 验证
 sleep 1
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${APP_PORT}/api/v1/login 2>/dev/null || echo "000")
 
-if [ "$HTTP_CODE" != "000" ]; then
-    echo "✅ 服务响应正常 (HTTP ${HTTP_CODE})"
-else
-    echo "⚠️  服务可能还在启动中，请稍后手动验证"
-fi
-
-# 完成
 echo ""
 echo "=========================================="
 echo "  ✅ 部署完成!"
@@ -186,19 +137,15 @@ echo ""
 echo "  服务地址:  http://$(hostname -I | awk '{print $1}'):${APP_PORT}"
 echo "  项目目录:  ${DEPLOY_DIR}"
 echo "  配置文件:  ${DEPLOY_DIR}/configs/config.json"
-echo ""
-echo "  超级管理员账号: admin"
-echo "  超级管理员密码: admin123"
-echo "  ⚠️  请登录后尽快修改密码!"
+if [ "$HTTP_CODE" != "000" ]; then
+    echo "  接口状态:  HTTP ${HTTP_CODE} ✅"
+else
+    echo "  接口状态:  ⚠️  请稍后手动验证"
+fi
 echo ""
 echo "  常用命令:"
 echo "    查看状态:  sudo systemctl status ${APP_NAME}"
 echo "    查看日志:  sudo journalctl -u ${APP_NAME} -f"
 echo "    重启服务:  sudo systemctl restart ${APP_NAME}"
 echo "    停止服务:  sudo systemctl stop ${APP_NAME}"
-echo ""
-echo "  测试登录:"
-echo "    curl -X POST http://127.0.0.1:${APP_PORT}/api/v1/login \\"
-echo "      -H 'Content-Type: application/json' \\"
-echo "      -d '{\"username\":\"admin\",\"password\":\"admin123\"}'"
 echo "=========================================="

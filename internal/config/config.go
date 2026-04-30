@@ -95,12 +95,12 @@ func DefaultConfig() *Config {
 			Bucket:          "fasvio",
 		},
 		JWT: JWTConfig{
-			Secret:     "supply-chain-jwt-secret-key-change-in-production",
+			Secret:     "",
 			ExpireHour: 24,
 		},
 		WanLiNiu: WanLiNiuConfig{
-			AppKey:       "3463852133",
-			Secret:       "0e9798a3ace75d01f488dfeaf3f1c2e2",
+			AppKey:       "",
+			Secret:       "",
 			BaseURL:      "https://open-api.hupun.com/api",
 			SyncInterval: 60,
 		},
