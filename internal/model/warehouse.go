@@ -89,7 +89,7 @@ type WarehouseBillingListReq struct {
 	StartDate string `form:"start_date"`
 	EndDate   string `form:"end_date"`
 	Page      int    `form:"page"`
-	PageSize  int    `form:"page_size"`
+	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=200"`
 }
 
 type WarehouseBillingListResp struct {
@@ -100,7 +100,7 @@ type WarehouseBillingListResp struct {
 
 type WarehouseMyRechargeListReq struct {
 	Page     int `form:"page"`
-	PageSize int `form:"page_size"`
+	PageSize int `form:"page_size" binding:"omitempty,min=1,max=200"`
 }
 
 type WarehouseMyRechargeListResp struct {
@@ -120,7 +120,7 @@ type WarehouseAdminRechargeListReq struct {
 	StartDate string `form:"start_date"`
 	EndDate   string `form:"end_date"`
 	Page      int    `form:"page"`
-	PageSize  int    `form:"page_size"`
+	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=200"`
 }
 
 type WarehouseRechargeRecordResp struct {
@@ -153,7 +153,7 @@ type WarehouseAdminBillingListReq struct {
 	EndDate   string `form:"end_date"`
 	AccountID uint64 `form:"account_id"`
 	Page      int    `form:"page"`
-	PageSize  int    `form:"page_size"`
+	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=200"`
 }
 
 type WarehouseBillingRecordWithUser struct {

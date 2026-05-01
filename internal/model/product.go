@@ -225,7 +225,7 @@ type ProductListReq struct {
 	StartDate   string   `form:"start_date"`
 	EndDate     string   `form:"end_date"`
 	Page        int      `form:"page"`
-	PageSize    int      `form:"page_size"`
+	PageSize    int      `form:"page_size" binding:"omitempty,min=1,max=200"`
 	// search_after cursor fields for ES pagination (named generically)
 	SearchAfterCode string `form:"search_after_code"`
 	SearchAfterID   string `form:"search_after_id"`
