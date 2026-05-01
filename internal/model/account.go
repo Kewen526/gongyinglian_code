@@ -97,7 +97,7 @@ type PermissionDetail struct {
 
 type AccountListReq struct {
 	Page     int `form:"page"`
-	PageSize int `form:"page_size"`
+	PageSize int `form:"page_size" binding:"omitempty,min=1,max=200"`
 }
 
 type AccountListResp struct {

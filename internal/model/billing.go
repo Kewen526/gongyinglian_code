@@ -112,7 +112,7 @@ type BillingListReq struct {
 	ShopName  string `form:"shop_name"`
 	Status    string `form:"status"` // success/refund/insufficient/error
 	Page      int    `form:"page"`
-	PageSize  int    `form:"page_size"`
+	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=200"`
 }
 
 type WalletResp struct {
@@ -154,7 +154,7 @@ type AdminRechargeListReq struct {
 	StartDate string `form:"start_date"` // YYYY-MM-DD
 	EndDate   string `form:"end_date"`
 	Page      int    `form:"page"`
-	PageSize  int    `form:"page_size"`
+	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=200"`
 }
 
 type AdminRechargeListResp struct {
@@ -172,7 +172,7 @@ type AdminBillingListReq struct {
 	Type      string `form:"type"`       // recharge/deduct/refund（空=全部）
 	AccountID uint64 `form:"account_id"` // 按账号筛选（可选）
 	Page      int    `form:"page"`
-	PageSize  int    `form:"page_size"`
+	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=200"`
 }
 
 type BillingRecordWithUser struct {
@@ -190,7 +190,7 @@ type AdminBillingListResp struct {
 
 type MyRechargeListReq struct {
 	Page     int `form:"page"`
-	PageSize int `form:"page_size"`
+	PageSize int `form:"page_size" binding:"omitempty,min=1,max=200"`
 }
 
 type MyRechargeListResp struct {
