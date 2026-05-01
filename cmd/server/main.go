@@ -222,5 +222,5 @@ func initSuperAdmin(db *gorm.DB) {
 	if err := db.Create(&admin).Error; err != nil {
 		log.Fatalf("Failed to create super admin: %v", err)
 	}
-	log.Println("[Init] Super admin created: username=admin, password=admin123")
+	log.Println("[Init] Super admin created: username=admin")
 }
