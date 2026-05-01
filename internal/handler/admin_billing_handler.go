@@ -66,7 +66,12 @@ func (h *AdminBillingHandler) RejectRecharge(c *gin.Context) {
 		return
 	}
 	var req model.RejectRechargeReq
-	_ = c.ShouldBindJSON(&req) // remark is optional
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			response.BadRequest(c, "请求体格式错误: "+err.Error())
+			return
+		}
+	}
 	if err := h.billingSvc.RejectRecharge(id, req.Remark); err != nil {
 		response.InternalError(c, err.Error())
 		return
