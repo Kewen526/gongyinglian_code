@@ -6,12 +6,32 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strings"
 	"supply-chain/internal/config"
 	"supply-chain/pkg/response"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+// originMatches checks if an origin matches a pattern.
+// Supports exact match, "*" wildcard, and "*.suffix" wildcard (e.g. "*.run.app").
+func originMatches(pattern, origin string) bool {
+	if pattern == "*" || pattern == origin {
+		return true
+	}
+	if strings.HasPrefix(pattern, "*.") {
+		suffix := pattern[1:] // ".run.app"
+		// Strip protocol from origin to get host (e.g. "https://foo.run.app" → "foo.run.app")
+		host := strings.TrimPrefix(strings.TrimPrefix(origin, "https://"), "http://")
+		// Remove port if present
+		if idx := strings.Index(host, ":"); idx != -1 {
+			host = host[:idx]
+		}
+		return strings.HasSuffix(host, suffix)
+	}
+	return false
+}
 
 func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -24,7 +44,7 @@ func CORS() gin.HandlerFunc {
 		allowed := false
 		origins := config.GlobalConfig.Security.AllowedOrigins
 		for _, o := range origins {
-			if o == "*" || o == origin {
+			if originMatches(o, origin) {
 				allowed = true
 				break
 			}
@@ -85,9 +105,10 @@ func AppTokenCheck() gin.HandlerFunc {
 		now := time.Now().Unix()
 		currentBucket := now / interval
 
-		// Accept current and previous bucket to handle boundary clock skew
+		// Accept previous, current, and next bucket to handle client/server clock skew
 		if clientToken == generateHMACToken(secret, currentBucket) ||
-			clientToken == generateHMACToken(secret, currentBucket-1) {
+			clientToken == generateHMACToken(secret, currentBucket-1) ||
+			clientToken == generateHMACToken(secret, currentBucket+1) {
 			c.Next()
 			return
 		}
